@@ -1,6 +1,6 @@
 // Author PWA Service Worker (Network-First Navigation + Cached Assets)
 
-const CACHE_NAME = "author-shell-v21";
+const CACHE_NAME = "author-shell-v25";
 const SHELL_ASSETS = [
   "/",
   "/index.html",
@@ -25,7 +25,15 @@ self.addEventListener("activate", (event) => {
       return Promise.all(
         keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
       );
-    }).then(() => self.clients.claim())
+    }).then(() => {
+      return self.clients.claim();
+    }).then(() => {
+      return self.clients.matchAll({ type: "window" }).then((clients) => {
+        clients.forEach((client) => {
+          client.navigate(client.url);
+        });
+      });
+    })
   );
 });
 

@@ -4,13 +4,30 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Author — Private Identity & Messaging</title>
+  <script>
+    (function() {
+      const VER = "25";
+      if (localStorage.getItem("author_cache_ver") !== VER) {
+        localStorage.setItem("author_cache_ver", VER);
+        if ('caches' in window) {
+          caches.keys().then(keys => Promise.all(keys.map(k => caches.delete(k)))).then(() => {
+            if ('serviceWorker' in navigator) {
+              navigator.serviceWorker.getRegistrations().then(regs => {
+                for (let r of regs) r.unregister();
+              });
+            }
+          });
+        }
+      }
+    })();
+  </script>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" type="image/svg+xml" href="/icon.svg">
   <meta name="theme-color" content="#111111">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Author">
-  <link rel="stylesheet" href="/style.css?v=21">
+  <link rel="stylesheet" href="/style.css?v=25">
   <script src="/nacl-fast.min.js"></script>
 </head>
 <body>
@@ -102,52 +119,58 @@
         </div>
       </div>
 
-      <!-- Professional Profile Card -->
-      <div id="activeIdentityCard" class="profile-card" style="display: none;">
-        <div class="profile-banner"></div>
-        <div class="profile-body">
-          <div class="profile-avatar" id="profileAvatar">?</div>
-          <div class="profile-name-row">
-            <span class="profile-handle">@<span id="cardUsername"></span></span>
-            <span class="badge badge-active" id="cardStatusBadge">Active</span>
-          </div>
-          <div style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0.1rem;">Author · Self-sovereign identity</div>
-
-          <div class="profile-meta">
-            <div class="profile-meta-item">
-              <span>Key Version</span>
-              <span class="profile-meta-value" id="cardVersion">1</span>
+      <!-- Identity Dashboard (Desktop 2-Column Grid, Mobile Full-Width) -->
+      <div class="identity-dashboard" id="identityDashboard" style="display: none;">
+        <!-- Column 1: Identity Card -->
+        <div id="activeIdentityCard" class="profile-card">
+          <div class="profile-banner"></div>
+          <div class="profile-body">
+            <div class="profile-avatar" id="profileAvatar">?</div>
+            <div class="profile-name-row">
+              <span class="profile-handle">@<span id="cardUsername"></span></span>
+              <span class="badge badge-active" id="cardStatusBadge">Active</span>
             </div>
-            <div class="profile-meta-item">
-              <span>Devices Used</span>
-              <span class="profile-meta-value" id="cardSlots">1 / 3</span>
+            <div style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0.1rem;">Author · Self-sovereign identity</div>
+
+            <div class="profile-meta">
+              <div class="profile-meta-item">
+                <span>Key Version</span>
+                <span class="profile-meta-value" id="cardVersion">1</span>
+              </div>
+              <div class="profile-meta-item">
+                <span>Devices Used</span>
+                <span class="profile-meta-value" id="cardSlots">1 / 3</span>
+              </div>
+            </div>
+
+            <div class="profile-actions" style="margin-top: 1.25rem;">
+              <button class="btn btn-secondary" id="btnShowImportPanel">+ Add Another Identity</button>
+              <button class="btn btn-secondary" id="btnExportKey">Export Backup Key</button>
+              <button class="btn btn-secondary" id="btnRotateKey">Rotate Key</button>
+              <button class="btn btn-danger" id="btnRevokeIdentity">Revoke Identity</button>
             </div>
           </div>
+        </div>
 
-          <div class="profile-key-section">
-            <div class="profile-key-label">Verification Key (public — safe to share)</div>
-            <div class="profile-key-value" id="cardPubKey"></div>
+        <!-- Column 2: Verification Key & Trusted Network -->
+        <div class="identity-secondary-col">
+          <div class="card" style="margin-bottom: 1.25rem;">
+            <div class="card-title">Verification Key</div>
+            <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.4rem;">Public cryptographic key (safe to share):</div>
+            <div class="key-box" id="cardPubKey" style="word-break: break-all; max-height: 80px; overflow-y: auto; user-select: all;"></div>
           </div>
 
-          <div class="profile-actions">
-            <button class="btn btn-secondary" id="btnShowImportPanel">+ Add Another Identity</button>
-            <button class="btn btn-secondary" id="btnExportKey">Export Backup Key</button>
-            <button class="btn btn-secondary" id="btnRotateKey">Rotate Key</button>
-            <button class="btn btn-danger" id="btnRevokeIdentity">Revoke Identity</button>
+          <div id="wotCard" class="card" style="margin-bottom: 0;">
+            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+              <span>Trusted Contacts</span>
+              <span class="badge badge-verified" id="wotVouchedCount">0 Verified</span>
+            </div>
+            <div id="wotEmptyNotice" style="font-size: 0.82rem; color: var(--text-muted); font-style: italic; margin-bottom: 0.75rem;">
+              No verified contacts yet. Open a chat or use Directory Lookup to verify someone.
+            </div>
+            <div id="wotPeersList" style="display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0;"></div>
           </div>
         </div>
-      </div>
-
-      <!-- Trusted Contacts Card -->
-      <div id="wotCard" class="card" style="margin-top: 0;">
-        <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
-          <span>Trusted Contacts</span>
-          <span class="badge badge-verified" id="wotVouchedCount">0 Verified</span>
-        </div>
-        <div id="wotEmptyNotice" style="font-size: 0.82rem; color: var(--text-muted); font-style: italic; margin-bottom: 0.75rem;">
-          No verified contacts yet. Open a chat or use Directory Lookup to verify someone.
-        </div>
-        <div id="wotPeersList" style="display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1rem;"></div>
       </div>
     </div>
 
@@ -371,6 +394,6 @@
 
 <div id="toast" class="toast"></div>
 
-<script src="/app.js?v=21"></script>
+<script src="/app.js?v=25"></script>
 </body>
 </html>

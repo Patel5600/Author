@@ -1,6 +1,6 @@
 // Author Web App Client
 
-const CURRENT_CACHE_VERSION = "21";
+const CURRENT_CACHE_VERSION = "25";
 try {
   const cachedVer = localStorage.getItem("author_cache_version");
   if (cachedVer !== CURRENT_CACHE_VERSION) {
@@ -684,7 +684,7 @@ async function attemptBiometricUnlock() {
 
 function unlockVault() {
   document.getElementById("lockScreen").style.display = "none";
-  document.getElementById("appContainer").style.display = "block";
+  document.getElementById("appContainer").style.display = "flex";
   const vault = loadVault();
   if (vault.identities.length > 0 && vault.activeIndex === -1) {
     vault.activeIndex = 0;
@@ -694,12 +694,19 @@ function unlockVault() {
   ensureAllIdentitiesRegistered().then(() => {
     startRealtimeStream();
   });
+
+  // Automatically land directly in full-screen Encrypted Chat if identity exists
+  if (vault.identities.length > 0) {
+    const tabChat = document.querySelector('[data-tab="tab-chat"]');
+    if (tabChat) tabChat.click();
+  }
 }
 
 // UI Refresh
 async function refreshUI() {
   currentIdentity = getActiveIdentity();
   const noIdCard = document.getElementById("noIdentityCard");
+  const identityDashboard = document.getElementById("identityDashboard");
   const activeCard = document.getElementById("activeIdentityCard");
   const select = document.getElementById("identitySelect");
   const btnNew = document.getElementById("btnHeaderNewId");
@@ -728,8 +735,9 @@ async function refreshUI() {
   }
 
   if (!currentIdentity) {
-    noIdCard.style.display = "block";
-    activeCard.style.display = "none";
+    if (noIdCard) noIdCard.style.display = "block";
+    if (identityDashboard) identityDashboard.style.display = "none";
+    if (activeCard) activeCard.style.display = "none";
     activeChatPeer = null;
     renderConversationsList();
     const emptyState = document.getElementById("chatEmptyState");
@@ -739,8 +747,9 @@ async function refreshUI() {
     const container = document.querySelector(".messenger-container");
     if (container) container.classList.remove("in-chat");
   } else {
-    noIdCard.style.display = "none";
-    activeCard.style.display = "block";
+    if (noIdCard) noIdCard.style.display = "none";
+    if (identityDashboard) identityDashboard.style.display = "grid";
+    if (activeCard) activeCard.style.display = "block";
 
     document.getElementById("cardUsername").innerText = currentIdentity.username;
     document.getElementById("cardPubKey").innerText = currentIdentity.pubKey;
@@ -2345,12 +2354,17 @@ function initApp() {
     }
   });
 
-  // Service Worker Registration for Offline Shell Caching
+  // Service Worker Registration with proactive update & controllerchange auto-reload
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").then((reg) => {
+      reg.update();
       console.log("Author PWA Service Worker active (Scope:", reg.scope, ")");
     }).catch((err) => {
       console.log("Service worker registration:", err.message);
+    });
+
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      window.location.reload();
     });
   }
 }
