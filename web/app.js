@@ -315,7 +315,7 @@ function formatAttestationPayload(issuerPub, subjectPub, level, timestamp) {
   return `${WOT_PREFIX}:TRUST:${issuerPub.toLowerCase()}:${subjectPub.toLowerCase()}:${level}:${timestamp}`;
 }
 
-function signAttestation(subjectPub, level = 2) {
+function signAttestation(subjectPub, level = 2, handle = "") {
   if (!currentIdentity || !subjectPub) return null;
   const ts = Math.floor(Date.now() / 1000);
   const msg = formatAttestationPayload(currentIdentity.pubKey, subjectPub, level, ts);
@@ -323,6 +323,7 @@ function signAttestation(subjectPub, level = 2) {
   const att = {
     issuer_pub: currentIdentity.pubKey.toLowerCase(),
     subject_pub: subjectPub.toLowerCase(),
+    handle: handle || "",
     level,
     timestamp: ts,
     sig: toHex(sigBytes)
@@ -360,6 +361,76 @@ function getContactTrustStatus(subjectPub) {
     }
   }
   return { level: 0, label: "⚪ Unvouched", badgeClass: "badge-stranger", isDirect: false };
+}
+
+function renderWoTNetwork() {
+  if (!currentIdentity) return;
+  const graph = loadTrustGraph(currentIdentity.username);
+  const listEl = document.getElementById("wotPeersList");
+  const countEl = document.getElementById("wotVouchedCount");
+  const emptyEl = document.getElementById("wotEmptyNotice");
+  if (!listEl) return;
+
+  const directKeys = Object.keys(graph.direct || {});
+  if (countEl) countEl.innerText = `${directKeys.length} Vouched`;
+
+  if (directKeys.length === 0) {
+    if (emptyEl) emptyEl.style.display = "block";
+    listEl.innerHTML = "";
+    return;
+  }
+
+  if (emptyEl) emptyEl.style.display = "none";
+  listEl.innerHTML = "";
+
+  directKeys.forEach(pub => {
+    const att = graph.direct[pub];
+    const item = document.createElement("div");
+    item.style.display = "flex";
+    item.style.alignItems = "center";
+    item.style.justifyContent = "space-between";
+    item.style.padding = "0.55rem 0.75rem";
+    item.style.background = "var(--bg)";
+    item.style.border = "1px solid var(--border)";
+    item.style.borderRadius = "6px";
+
+    const left = document.createElement("div");
+    const peerDisplay = att.handle ? `@${att.handle}` : `Key: ${pub.slice(0, 10)}...`;
+    left.innerHTML = `
+      <div style="font-weight: 600; font-size: 0.88rem; color: var(--text-main); display: flex; align-items: center; gap: 0.4rem;">
+        <span>${peerDisplay}</span>
+        <span class="badge badge-verified" style="font-size: 0.65rem; padding: 0.1rem 0.35rem;">🛡️ Verified Direct</span>
+      </div>
+      <div style="font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); margin-top: 0.15rem;">${pub.slice(0, 24)}...</div>
+    `;
+
+    const right = document.createElement("div");
+    right.style.display = "flex";
+    right.style.gap = "0.4rem";
+
+    if (att.handle) {
+      const btnChat = document.createElement("button");
+      btnChat.className = "btn btn-secondary btn-sm";
+      btnChat.innerText = "💬 Chat";
+      btnChat.onclick = () => openConversationWith(att.handle);
+      right.appendChild(btnChat);
+    }
+
+    const btnRevoke = document.createElement("button");
+    btnRevoke.className = "btn btn-danger btn-sm";
+    btnRevoke.innerText = "Revoke";
+    btnRevoke.onclick = () => {
+      revokeAttestation(pub);
+      renderWoTNetwork();
+      updateActiveChatTrustBadge();
+      showToast("Trust attestation revoked.");
+    };
+    right.appendChild(btnRevoke);
+
+    item.appendChild(left);
+    item.appendChild(right);
+    listEl.appendChild(item);
+  });
 }
 
 // State
@@ -485,6 +556,7 @@ async function refreshUI() {
     }
   }
 
+  renderWoTNetwork();
   await checkHealth();
 }
 
@@ -909,9 +981,13 @@ function updateActiveChatTrustBadge() {
   }
 }
 
-function openTrustVerificationModal() {
-  if (!activeChatPeer) return;
-  const cached = getCachedRecipientKey(activeChatPeer);
+function openTrustVerificationModal(targetPeer) {
+  const peer = (targetPeer || activeChatPeer || "").toLowerCase().trim();
+  if (!peer) {
+    showToast("No contact selected to verify.");
+    return;
+  }
+  const cached = getCachedRecipientKey(peer);
   if (!cached || !cached.pubkey) {
     showToast("Contact public key not resolved yet.");
     return;
@@ -923,7 +999,7 @@ function openTrustVerificationModal() {
   const btnEndorse = document.getElementById("btnEndorseDirect");
   const btnRevoke = document.getElementById("btnRevokeEndorsement");
 
-  if (handleEl) handleEl.innerText = "@" + activeChatPeer;
+  if (handleEl) handleEl.innerText = "@" + peer;
   if (pubKeyEl) pubKeyEl.innerText = cached.pubkey;
 
   const status = getContactTrustStatus(cached.pubkey);
@@ -941,16 +1017,30 @@ function openTrustVerificationModal() {
   }
 
   btnEndorse.onclick = () => {
-    signAttestation(cached.pubkey, 2);
+    signAttestation(cached.pubkey, 2, peer);
     updateActiveChatTrustBadge();
-    showToast(`Identity @${activeChatPeer} cryptographically verified!`);
+    renderWoTNetwork();
+    const trustBadge = document.getElementById("lookupTrustBadge");
+    if (trustBadge) {
+      const newStatus = getContactTrustStatus(cached.pubkey);
+      trustBadge.className = `badge ${newStatus.badgeClass}`;
+      trustBadge.innerText = newStatus.label;
+    }
+    showToast(`Identity @${peer} cryptographically verified!`);
     closeTrustModal();
   };
 
   btnRevoke.onclick = () => {
     revokeAttestation(cached.pubkey);
     updateActiveChatTrustBadge();
-    showToast(`Trust revoked for @${activeChatPeer}`);
+    renderWoTNetwork();
+    const trustBadge = document.getElementById("lookupTrustBadge");
+    if (trustBadge) {
+      const newStatus = getContactTrustStatus(cached.pubkey);
+      trustBadge.className = `badge ${newStatus.badgeClass}`;
+      trustBadge.innerText = newStatus.label;
+    }
+    showToast(`Trust revoked for @${peer}`);
     closeTrustModal();
   };
 
@@ -1081,6 +1171,20 @@ async function resolveUser() {
     document.getElementById("btnChatWithResolved").onclick = () => {
       openConversationWith(username);
     };
+
+    const trustBadge = document.getElementById("lookupTrustBadge");
+    if (trustBadge) {
+      const trustStatus = getContactTrustStatus(data.pubkey);
+      trustBadge.className = `badge ${trustStatus.badgeClass}`;
+      trustBadge.innerText = trustStatus.label;
+    }
+
+    const btnVerifyResolved = document.getElementById("btnVerifyResolved");
+    if (btnVerifyResolved) {
+      btnVerifyResolved.onclick = () => {
+        openTrustVerificationModal(username);
+      };
+    }
   } catch (err) {
     alert("Lookup error: " + err.message);
   }
@@ -1485,7 +1589,10 @@ function initApp() {
 
   // Web of Trust Verification Handlers
   const badgeTrust = document.getElementById("activeContactTrustBadge");
-  if (badgeTrust) badgeTrust.onclick = openTrustVerificationModal;
+  if (badgeTrust) badgeTrust.onclick = () => openTrustVerificationModal();
+
+  const btnHeaderTrust = document.getElementById("btnHeaderTrustVerify");
+  if (btnHeaderTrust) btnHeaderTrust.onclick = () => openTrustVerificationModal();
 
   const btnCloseTrust = document.getElementById("btnCloseTrustModal");
   if (btnCloseTrust) btnCloseTrust.onclick = closeTrustModal;
