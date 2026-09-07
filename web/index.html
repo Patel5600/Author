@@ -246,7 +246,11 @@
 
             <div class="chat-box" id="chatBox"></div>
 
+            <div id="attachmentStaging" class="attachment-staging" style="display: none;"></div>
+
             <div class="chat-composer">
+              <input type="file" id="inputFileAttachment" style="display: none;" accept="image/*,.pdf,.txt,.doc,.docx,.csv,.json">
+              <button class="btn btn-secondary btn-sm" id="btnAttachFile" type="button" title="Attach file or photo" style="padding: 0.5rem 0.75rem;">Attach</button>
               <input type="text" id="inputChatMessage" placeholder="Type your encrypted message..." autocomplete="off" style="flex: 1;">
               <button class="btn btn-primary btn-send" id="btnSendChatMessage">
                 <span>Send</span>
@@ -363,6 +367,6 @@
 
 <div id="toast" class="toast"></div>
 
-<script src="/app.js?v=16"></script>
+<script src="/app.js?v=17"></script>
 </body>
 </html>

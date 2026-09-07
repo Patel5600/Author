@@ -154,12 +154,42 @@ function loadChatHistory(username) {
   }
 }
 
-function saveChatHistoryMessage(username, type, text, sender, isE2EE = false, peer = "", msgId = "", status = "Sent", expiresAt = 0, readSent = false) {
+function formatFileSize(bytes) {
+  if (!bytes || bytes < 1024) return (bytes || 0) + " B";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+}
+
+let stagedAttachment = null;
+
+function renderAttachmentStaging() {
+  const el = document.getElementById("attachmentStaging");
+  if (!el) return;
+  if (!stagedAttachment) {
+    el.style.display = "none";
+    el.innerHTML = "";
+    return;
+  }
+  el.style.display = "flex";
+  el.innerHTML = `
+    <div class="attachment-staging-name">${escapeHtml(stagedAttachment.filename)} (${formatFileSize(stagedAttachment.size)})</div>
+    <button class="attachment-staging-remove" id="btnRemoveStagedAttachment" type="button">Remove</button>
+  `;
+  const btnRemove = document.getElementById("btnRemoveStagedAttachment");
+  if (btnRemove) {
+    btnRemove.onclick = () => {
+      stagedAttachment = null;
+      renderAttachmentStaging();
+    };
+  }
+}
+
+function saveChatHistoryMessage(username, type, text, sender, isE2EE = false, peer = "", msgId = "", status = "Sent", expiresAt = 0, readSent = false, attachment = null) {
   if (!username) return "";
   const history = loadChatHistory(username);
   const resolvedPeer = (peer || (type === "incoming" ? sender : "")).toLowerCase().trim();
   const id = msgId || ("msg_" + getRandomNonce(8));
-  history.push({ id, type, text, sender, isE2EE, peer: resolvedPeer, time: Date.now(), status, expiresAt, readSent });
+  history.push({ id, type, text, sender, isE2EE, peer: resolvedPeer, time: Date.now(), status, expiresAt, readSent, attachment });
   if (history.length > 200) history.shift();
   localStorage.setItem(getChatHistoryKey(username), JSON.stringify(history));
   return id;
@@ -303,7 +333,7 @@ function renderChatHistory(username, filterPeer = "") {
     return;
   }
   for (const m of filtered) {
-    appendChatMessageDOM(m.type, m.text, m.sender, m.isE2EE, m.time, m.status || "Sent", m.id || "");
+    appendChatMessageDOM(m.type, m.text, m.sender, m.isE2EE, m.time, m.status || "Sent", m.id || "", m.attachment || null);
   }
   box.scrollTop = box.scrollHeight;
 }
@@ -1310,22 +1340,29 @@ async function sendChatMessage() {
   const msgInput = document.getElementById("inputChatMessage");
   const text = (msgInput?.value || "").trim();
 
-  if (!text) return;
+  if (!text && !stagedAttachment) return;
 
-  // Clear input immediately for zero-lag responsiveness
-  msgInput.value = "";
+  // Clear input and staged attachment immediately
+  if (msgInput) msgInput.value = "";
+  const attachmentToSend = stagedAttachment;
+  stagedAttachment = null;
+  renderAttachmentStaging();
 
   // 1. Resolve recipient key (cached or authoritative query via blinded token)
   let recipEdPubHex = "";
   const recipData = await resolveRecipientBinding(recipient);
   if (!recipData) {
     showToast(`Recipient @${recipient} not found. Look them up in Directory first.`);
-    msgInput.value = text;
+    if (msgInput) msgInput.value = text;
+    stagedAttachment = attachmentToSend;
+    renderAttachmentStaging();
     return;
   }
   if (recipData.status === "revoked") {
     showToast(`Cannot send - @${recipient} account is revoked.`);
-    msgInput.value = text;
+    if (msgInput) msgInput.value = text;
+    stagedAttachment = attachmentToSend;
+    renderAttachmentStaging();
     return;
   }
   recipEdPubHex = recipData.pubkey;
@@ -1335,10 +1372,10 @@ async function sendChatMessage() {
   const ttl = retentionSelect ? parseInt(retentionSelect.value || "0", 10) : 0;
   const expiresAt = ttl > 0 ? (Date.now() + ttl * 1000) : 0;
 
-  // Optimistic UI: Append immediately with unique message ID, Sending state, and expiresAt
+  // Optimistic UI: Append immediately with unique message ID, Sending state, expiresAt, and attachment
   const msgId = "msg_" + getRandomNonce(8);
-  saveChatHistoryMessage(currentIdentity.username, "outgoing", text, currentIdentity.username, true, recipient, msgId, "Sending", expiresAt);
-  appendChatMessageDOM("outgoing", text, currentIdentity.username, true, Date.now(), "Sending", msgId);
+  saveChatHistoryMessage(currentIdentity.username, "outgoing", text, currentIdentity.username, true, recipient, msgId, "Sending", expiresAt, false, attachmentToSend);
+  appendChatMessageDOM("outgoing", text, currentIdentity.username, true, Date.now(), "Sending", msgId, attachmentToSend);
   renderConversationsList(document.getElementById("inputFilterChats")?.value || "");
 
   // 3. Encrypt in-memory via Curve25519 & XSalsa20-Poly1305
@@ -1349,9 +1386,13 @@ async function sendChatMessage() {
 
     const innerPayload = JSON.stringify({
       v: 1,
-      type: "msg",
+      type: attachmentToSend ? "file" : "msg",
       msg_id: msgId,
       body: text,
+      filename: attachmentToSend ? attachmentToSend.filename : "",
+      mime: attachmentToSend ? attachmentToSend.mime : "",
+      size: attachmentToSend ? attachmentToSend.size : 0,
+      data: attachmentToSend ? attachmentToSend.data : "",
       sender: currentIdentity.username,
       ttl: ttl
     });
@@ -1605,6 +1646,7 @@ async function startRealtimeStream() {
             isE2EE = true;
             let incomingMsgId = "";
             let incomingExpiresAt = 0;
+            let incomingAttachment = null;
             try {
               const inner = JSON.parse(bodyText);
               if (inner && inner.type === "receipt" && inner.target_id) {
@@ -1615,11 +1657,19 @@ async function startRealtimeStream() {
                 for (const tid of inner.target_ids) {
                   updateMessageDeliveryStatus(username, tid, "Read");
                 }
-              } else if (inner && inner.type === "msg") {
-                bodyText = inner.body || inner.text || bodyText;
+              } else if (inner && (inner.type === "msg" || inner.type === "file")) {
+                bodyText = inner.body || inner.text || (inner.type === "file" ? "" : bodyText);
                 incomingMsgId = inner.msg_id || "";
                 if (inner.ttl && inner.ttl > 0) {
                   incomingExpiresAt = Date.now() + (inner.ttl * 1000);
+                }
+                if (inner.type === "file" && inner.data) {
+                  incomingAttachment = {
+                    filename: inner.filename || "file",
+                    mime: inner.mime || "application/octet-stream",
+                    size: inner.size || 0,
+                    data: inner.data
+                  };
                 }
                 if (inner.msg_id && (env.sender || m.sender)) {
                   sendDeliveryReceipt(env.sender || m.sender, inner.msg_id);
@@ -1656,11 +1706,11 @@ async function startRealtimeStream() {
         }
       }
 
-      saveChatHistoryMessage(username, "incoming", bodyText, senderName, isE2EE, peer, incomingMsgId, "Delivered", incomingExpiresAt, readSent);
+      saveChatHistoryMessage(username, "incoming", bodyText, senderName, isE2EE, peer, incomingMsgId, "Delivered", incomingExpiresAt, readSent, incomingAttachment);
       renderConversationsList(document.getElementById("inputFilterChats")?.value || "");
 
       if (activeChatPeer && activeChatPeer === peer) {
-        appendChatMessageDOM("incoming", bodyText, senderName, isE2EE, Date.now());
+        appendChatMessageDOM("incoming", bodyText, senderName, isE2EE, Date.now(), "Delivered", incomingMsgId, incomingAttachment);
       } else {
         showToast(`New message from @${senderName}`);
       }
@@ -1714,7 +1764,7 @@ async function acknowledgeMessages(ids) {
   }
 }
 
-function appendChatMessageDOM(type, text, sender, isE2EE = false, time = Date.now(), status = "Sent", msgId = "") {
+function appendChatMessageDOM(type, text, sender, isE2EE = false, time = Date.now(), status = "Sent", msgId = "", attachment = null) {
   const box = document.getElementById("chatBox");
   if (!box) return;
   // Remove placeholder if present
@@ -1742,7 +1792,34 @@ function appendChatMessageDOM(type, text, sender, isE2EE = false, time = Date.no
   }
 
   const body = document.createElement("div");
-  body.innerText = text;
+
+  if (attachment) {
+    if (attachment.mime && attachment.mime.startsWith("image/")) {
+      const img = document.createElement("img");
+      img.className = "chat-msg-image";
+      img.src = attachment.data;
+      img.alt = attachment.filename || "Image";
+      img.onclick = () => {
+        const w = window.open("");
+        if (w) w.document.write(`<img src="${attachment.data}" style="max-width:100%; height:auto; background:#000;">`);
+      };
+      body.appendChild(img);
+    } else {
+      const fileLink = document.createElement("a");
+      fileLink.className = "chat-msg-file";
+      fileLink.href = attachment.data;
+      fileLink.download = attachment.filename || "file";
+      fileLink.innerHTML = `<span>${escapeHtml(attachment.filename || "File")}</span> <span style="font-size: 0.7rem; color: var(--text-muted);">(${formatFileSize(attachment.size)})</span>`;
+      body.appendChild(fileLink);
+    }
+  }
+
+  if (text) {
+    const textNode = document.createElement("div");
+    if (attachment) textNode.style.marginTop = "0.35rem";
+    textNode.innerText = text;
+    body.appendChild(textNode);
+  }
 
   const footer = document.createElement("div");
   footer.className = "msg-footer";
@@ -1958,6 +2035,34 @@ function initApp() {
 
   // Chat Sending & Inbox Sync
   document.getElementById("btnSendChatMessage").onclick = sendChatMessage;
+
+  // File Attachment Controls
+  const btnAttach = document.getElementById("btnAttachFile");
+  const inputAttach = document.getElementById("inputFileAttachment");
+  if (btnAttach && inputAttach) {
+    btnAttach.onclick = () => inputAttach.click();
+    inputAttach.onchange = (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      if (file.size > 1.5 * 1024 * 1024) {
+        showToast("File too large. Maximum attachment size is 1.5 MB.");
+        inputAttach.value = "";
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        stagedAttachment = {
+          filename: file.name,
+          mime: file.type || "application/octet-stream",
+          size: file.size,
+          data: reader.result
+        };
+        renderAttachmentStaging();
+        inputAttach.value = "";
+      };
+      reader.readAsDataURL(file);
+    };
+  }
 
   const btnRefreshInbox = document.getElementById("btnRefreshInbox");
   if (btnRefreshInbox) {
