@@ -606,3 +606,57 @@ input[type="text"]:focus, textarea:focus {
   border-color: var(--accent) !important;
 }
 
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
+
+.badge-active {
+  background: rgba(0, 229, 153, 0.15);
+  color: var(--accent);
+  border: 1px solid rgba(0, 229, 153, 0.3);
+}
+
+.badge-revoked {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--danger);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.badge-verified {
+  background: rgba(0, 229, 153, 0.18);
+  color: var(--accent);
+  border: 1px solid rgba(0, 229, 153, 0.4);
+}
+
+.badge-verified:hover {
+  background: rgba(0, 229, 153, 0.28);
+}
+
+.badge-vouched {
+  background: rgba(56, 189, 248, 0.18);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+}
+
+.badge-vouched:hover {
+  background: rgba(56, 189, 248, 0.28);
+}
+
+.badge-stranger {
+  background: rgba(148, 163, 184, 0.15);
+  color: var(--text-muted);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+}
+
+.badge-stranger:hover {
+  background: rgba(148, 163, 184, 0.25);
+  color: var(--text-main);
+}
+

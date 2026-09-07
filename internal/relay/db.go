@@ -109,12 +109,15 @@ func (s *Store) initSchema() error {
 	return err
 }
 
-// GetIdentity retrieves an identity record by username.
-func (s *Store) GetIdentity(username string) (*Identity, error) {
+// GetIdentity retrieves an identity record by username or blinded handle token.
+func (s *Store) GetIdentity(identifier string) (*Identity, error) {
+	blindToken := protocol.DeriveHandleToken(identifier)
 	row := s.db.QueryRow(`
 		SELECT username, pubkey, status, version, created_at, updated_at
-		FROM identities WHERE username = ?
-	`, username)
+		FROM identities WHERE username = ? OR username = ?
+		ORDER BY CASE WHEN username = ? THEN 1 ELSE 2 END
+		LIMIT 1
+	`, identifier, blindToken, identifier)
 
 	var id Identity
 	var createdUnix, updatedUnix int64

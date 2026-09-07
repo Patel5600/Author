@@ -27,9 +27,31 @@ const (
 	MaxTimestampDriftSeconds = 300
 	// ProtocolPrefix is the domain separation prefix used for canonical signing payloads.
 	ProtocolPrefix = "author-id:v1"
+	// HandlePrefix is the domain separation prefix for blind handle tokens.
+	HandlePrefix = "author-handle:v1"
+	// WoTPrefix is the domain separation prefix for Web of Trust attestations.
+	WoTPrefix = "author-wot:v1"
 	// MaxIdentitiesPerDevice is the default client policy cap.
 	MaxIdentitiesPerDevice = 3
 )
+
+// TrustLevel defines confidence in an identity attestation.
+type TrustLevel uint8
+
+const (
+	TrustLevelStranger TrustLevel = 0 // Unvouched
+	TrustLevelVouched  TrustLevel = 1 // Mutual / transitive vouch
+	TrustLevelDirect   TrustLevel = 2 // Verified in-person (QR / direct exchange)
+)
+
+// TrustAttestation represents a cryptographic peer endorsement in the Web of Trust.
+type TrustAttestation struct {
+	IssuerPub  string     `json:"issuer_pub"`  // Ed25519 public key of endorser
+	SubjectPub string     `json:"subject_pub"` // Ed25519 public key of endorsed party
+	Level      TrustLevel `json:"level"`       // Confidence level (1=Vouched, 2=Direct)
+	Timestamp  int64      `json:"timestamp"`   // Unix timestamp in seconds
+	Sig        string     `json:"sig"`         // Detached Ed25519 signature by issuer_pub
+}
 
 // ClaimRequest is submitted to POST /v1/claim.
 type ClaimRequest struct {

@@ -81,3 +81,48 @@ func TestSignatureCycle(t *testing.T) {
 		t.Fatalf("expected tampered message to fail verification")
 	}
 }
+
+func TestHandleTokenDerivation(t *testing.T) {
+	tok1 := DeriveHandleToken("alice")
+	tok2 := DeriveHandleToken("ALICE")
+	tok3 := DeriveHandleToken("  alice  ")
+	if tok1 != tok2 || tok1 != tok3 {
+		t.Fatalf("expected case and space insensitive handle derivation: %s vs %s vs %s", tok1, tok2, tok3)
+	}
+	if len(tok1) != 64 {
+		t.Fatalf("expected 64 hex character token (32 bytes), got %d chars", len(tok1))
+	}
+
+	tokBob := DeriveHandleToken("bob")
+	if tok1 == tokBob {
+		t.Fatalf("tokens for different handles must not collide")
+	}
+}
+
+func TestWebOfTrustAttestation(t *testing.T) {
+	alicePub, alicePriv, _ := GenerateKeyPair()
+	bobPub, _, _ := GenerateKeyPair()
+
+	aliceHex := PublicKeyToHex(alicePub)
+	bobHex := PublicKeyToHex(bobPub)
+	ts := time.Now().Unix()
+
+	// Alice directly endorses Bob
+	att, err := SignAttestation(alicePriv, aliceHex, bobHex, TrustLevelDirect, ts)
+	if err != nil {
+		t.Fatalf("failed to sign attestation: %v", err)
+	}
+
+	// Verify valid attestation
+	if err := VerifyAttestation(att); err != nil {
+		t.Fatalf("expected attestation to verify: %v", err)
+	}
+
+	// Tampered attestation (subject changed)
+	evePub, _, _ := GenerateKeyPair()
+	att.SubjectPub = PublicKeyToHex(evePub)
+	if err := VerifyAttestation(att); err == nil {
+		t.Fatalf("expected tampered attestation subject to fail verification")
+	}
+}
+

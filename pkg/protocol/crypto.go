@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 var (
@@ -130,4 +131,37 @@ func HexToPrivateKey(privKeyHex string) (ed25519.PrivateKey, error) {
 		return nil, ErrInvalidPrivKeyLength
 	}
 	return ed25519.PrivateKey(bytes), nil
+}
+
+// DeriveHandleToken generates a deterministic 32-byte cryptographic token
+// for a human username, blinding the plaintext handle from relay operators.
+func DeriveHandleToken(username string) string {
+	normalized := strings.ToLower(strings.TrimSpace(username))
+	raw := fmt.Sprintf("%s:%s", HandlePrefix, normalized)
+	h := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(h[:])
+}
+
+// FormatAttestationPayload produces the canonical string representation for Web of Trust endorsements.
+func FormatAttestationPayload(issuerPub, subjectPub string, level TrustLevel, timestamp int64) string {
+	return fmt.Sprintf("%s:TRUST:%s:%s:%d:%d", WoTPrefix, strings.ToLower(issuerPub), strings.ToLower(subjectPub), level, timestamp)
+}
+
+// SignAttestation generates a signed Web of Trust attestation endorsement.
+func SignAttestation(privKey ed25519.PrivateKey, issuerPub, subjectPub string, level TrustLevel, timestamp int64) (TrustAttestation, error) {
+	msg := FormatAttestationPayload(issuerPub, subjectPub, level, timestamp)
+	sig := SignMessage(privKey, msg)
+	return TrustAttestation{
+		IssuerPub:  strings.ToLower(issuerPub),
+		SubjectPub: strings.ToLower(subjectPub),
+		Level:      level,
+		Timestamp:  timestamp,
+		Sig:        sig,
+	}, nil
+}
+
+// VerifyAttestation cryptographically checks that the issuer signed the attestation for the subject.
+func VerifyAttestation(att TrustAttestation) error {
+	msg := FormatAttestationPayload(att.IssuerPub, att.SubjectPub, att.Level, att.Timestamp)
+	return VerifySignature(att.IssuerPub, msg, att.Sig)
 }

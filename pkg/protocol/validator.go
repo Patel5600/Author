@@ -10,35 +10,39 @@ import (
 )
 
 var (
-	usernameRegex = regexp.MustCompile(`^[a-z0-9_]{3,32}$`)
+	usernameRegex    = regexp.MustCompile(`^[a-z0-9_]{3,32}$`)
+	handleTokenRegex = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
 	reservedUsernames = map[string]struct{}{
-		"admin":     {},
+		"admin":         {},
 		"administrator": {},
-		"root":      {},
-		"system":    {},
-		"relay":     {},
-		"null":      {},
-		"undefined": {},
-		"author":    {},
-		"anonymous": {},
-		"moderator": {},
-		"support":   {},
-		"api":       {},
-		"health":    {},
+		"root":          {},
+		"system":        {},
+		"relay":         {},
+		"null":          {},
+		"undefined":     {},
+		"author":        {},
+		"anonymous":     {},
+		"moderator":     {},
+		"support":       {},
+		"api":           {},
+		"health":        {},
 	}
 
-	ErrUsernameTooShort   = errors.New("username must be at least 3 characters")
-	ErrUsernameTooLong    = errors.New("username must not exceed 32 characters")
+	ErrUsernameTooShort    = errors.New("username must be at least 3 characters")
+	ErrUsernameTooLong     = errors.New("username must not exceed 32 characters (or 64 hex characters for blinded tokens)")
 	ErrUsernameInvalidChar = errors.New("username must contain only lowercase letters, digits, and underscores [a-z0-9_]")
-	ErrUsernameReserved   = errors.New("username is reserved by the protocol")
-	ErrTimestampDrift     = errors.New("request timestamp drift exceeds allowed window (5 minutes)")
-	ErrNonceEmpty         = errors.New("nonce cannot be empty (min 16 hex chars)")
+	ErrUsernameReserved    = errors.New("username is reserved by the protocol")
+	ErrTimestampDrift      = errors.New("request timestamp drift exceeds allowed window (5 minutes)")
+	ErrNonceEmpty          = errors.New("nonce cannot be empty (min 16 hex chars)")
 )
 
-// ValidateUsername checks adherence to length, character set, and reservation rules.
+// ValidateUsername checks adherence to length, character set, reservation rules, or 64-char blinded tokens.
 func ValidateUsername(username string) error {
 	username = strings.TrimSpace(username)
+	if handleTokenRegex.MatchString(username) {
+		return nil
+	}
 	if len(username) < 3 {
 		return ErrUsernameTooShort
 	}

@@ -2,6 +2,7 @@ package test
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"author/internal/relay"
 	"author/pkg/client"
@@ -418,3 +420,80 @@ func TestEndToEndEncryption(t *testing.T) {
 		t.Fatal("expected decryption to fail with sender key, but it succeeded")
 	}
 }
+
+func TestBlindedHandlePrivacyAndWoT(t *testing.T) {
+	server, _ := setupTestServer(t)
+
+	// 1. Generate identity for Alice
+	alicePub, alicePriv, _ := protocol.GenerateKeyPair()
+	aliceHex := protocol.PublicKeyToHex(alicePub)
+
+	// Compute blind handle token for "alice_secret"
+	handleToken := protocol.DeriveHandleToken("alice_secret")
+	ts := time.Now().Unix()
+	nonce, _ := protocol.GenerateNonce(16)
+
+	// Format claim using blinded handle token
+	msg := protocol.FormatClaimPayload(handleToken, aliceHex, ts, nonce)
+	sig := protocol.SignMessage(alicePriv, msg)
+
+	claimReq := protocol.ClaimRequest{
+		Username:  handleToken,
+		PubKey:    aliceHex,
+		Timestamp: ts,
+		Nonce:     nonce,
+		Sig:       sig,
+	}
+
+	body, _ := json.Marshal(claimReq)
+	resp, err := http.Post(server.URL+"/v1/claim", "application/json", bytes.NewReader(body))
+	if err != nil || resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 Created for blinded claim, got: %v (err: %v)", resp.StatusCode, err)
+	}
+
+	// 2. Resolve by blinded token
+	resolveResp, err := http.Get(server.URL + "/v1/resolve/" + handleToken)
+	if err != nil || resolveResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK resolving by blinded token, got: %v", resolveResp.StatusCode)
+	}
+
+	var resData protocol.ResolveResponse
+	json.NewDecoder(resolveResp.Body).Decode(&resData)
+	if resData.PubKey != aliceHex {
+		t.Fatalf("expected resolved pubkey %s, got %s", aliceHex, resData.PubKey)
+	}
+
+	// 3. Resolve by plaintext alias (fallback support)
+	resolvePlainResp, err := http.Get(server.URL + "/v1/resolve/alice_secret")
+	if err != nil || resolvePlainResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK resolving by plaintext alias, got: %v", resolvePlainResp.StatusCode)
+	}
+
+	// 4. Test Web of Trust Peer Attestation
+	bobPub, bobPriv, _ := protocol.GenerateKeyPair()
+	bobHex := protocol.PublicKeyToHex(bobPub)
+
+	// Alice signs an attestation vouching for Bob (Level 2 = Direct In-Person)
+	attestation, err := protocol.SignAttestation(alicePriv, aliceHex, bobHex, protocol.TrustLevelDirect, ts)
+	if err != nil {
+		t.Fatalf("failed to sign WoT attestation: %v", err)
+	}
+
+	if err := protocol.VerifyAttestation(attestation); err != nil {
+		t.Fatalf("attestation verification failed: %v", err)
+	}
+
+	// Bob signs an attestation vouching for Charlie (Level 1 = Mutual/Transitive)
+	charliePub, _, _ := protocol.GenerateKeyPair()
+	charlieHex := protocol.PublicKeyToHex(charliePub)
+
+	charlieAtt, err := protocol.SignAttestation(bobPriv, bobHex, charlieHex, protocol.TrustLevelVouched, ts)
+	if err != nil {
+		t.Fatalf("failed to sign transitive attestation: %v", err)
+	}
+
+	if err := protocol.VerifyAttestation(charlieAtt); err != nil {
+		t.Fatalf("charlie attestation verification failed: %v", err)
+	}
+}
+

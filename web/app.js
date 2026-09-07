@@ -31,6 +31,13 @@ async function sha256Hex(str) {
   return toHex(new Uint8Array(hashBuffer));
 }
 
+const HANDLE_PREFIX = "author-handle:v1";
+
+async function deriveHandleToken(username) {
+  const normalized = (username || "").toLowerCase().trim();
+  return await sha256Hex(`${HANDLE_PREFIX}:${normalized}`);
+}
+
 // Curve25519 & E2EE Cryptographic Operations
 const CURVE25519_P = (2n ** 255n) - 19n;
 
@@ -284,6 +291,77 @@ function setCachedRecipientKey(username, data) {
   } catch (e) {}
 }
 
+// Bare-Metal Web of Trust (WoT) Engine
+const WOT_PREFIX = "author-wot:v1";
+
+function loadTrustGraph(username) {
+  if (!username) return { direct: {}, attestations: [] };
+  try {
+    const raw = localStorage.getItem(`author_wot_graph_${username}`);
+    return raw ? JSON.parse(raw) : { direct: {}, attestations: [] };
+  } catch {
+    return { direct: {}, attestations: [] };
+  }
+}
+
+function saveTrustGraph(username, graph) {
+  if (!username) return;
+  try {
+    localStorage.setItem(`author_wot_graph_${username}`, JSON.stringify(graph));
+  } catch (e) {}
+}
+
+function formatAttestationPayload(issuerPub, subjectPub, level, timestamp) {
+  return `${WOT_PREFIX}:TRUST:${issuerPub.toLowerCase()}:${subjectPub.toLowerCase()}:${level}:${timestamp}`;
+}
+
+function signAttestation(subjectPub, level = 2) {
+  if (!currentIdentity || !subjectPub) return null;
+  const ts = Math.floor(Date.now() / 1000);
+  const msg = formatAttestationPayload(currentIdentity.pubKey, subjectPub, level, ts);
+  const sigBytes = nacl.sign.detached(strToBytes(msg), fromHex(currentIdentity.privKey));
+  const att = {
+    issuer_pub: currentIdentity.pubKey.toLowerCase(),
+    subject_pub: subjectPub.toLowerCase(),
+    level,
+    timestamp: ts,
+    sig: toHex(sigBytes)
+  };
+  const graph = loadTrustGraph(currentIdentity.username);
+  graph.direct[subjectPub.toLowerCase()] = att;
+  saveTrustGraph(currentIdentity.username, graph);
+  return att;
+}
+
+function revokeAttestation(subjectPub) {
+  if (!currentIdentity || !subjectPub) return;
+  const graph = loadTrustGraph(currentIdentity.username);
+  delete graph.direct[subjectPub.toLowerCase()];
+  saveTrustGraph(currentIdentity.username, graph);
+}
+
+function getContactTrustStatus(subjectPub) {
+  if (!currentIdentity || !subjectPub) {
+    return { level: 0, label: "⚪ Unvouched", badgeClass: "badge-stranger", isDirect: false };
+  }
+  const pub = subjectPub.toLowerCase();
+  if (pub === currentIdentity.pubKey.toLowerCase()) {
+    return { level: 2, label: "🛡️ Self Identity", badgeClass: "badge-verified", isDirect: true };
+  }
+  const graph = loadTrustGraph(currentIdentity.username);
+  if (graph.direct && graph.direct[pub]) {
+    return { level: 2, label: "🛡️ Verified Direct", badgeClass: "badge-verified", isDirect: true };
+  }
+  if (graph.attestations) {
+    for (const att of graph.attestations) {
+      if (att.subject_pub.toLowerCase() === pub && graph.direct && graph.direct[att.issuer_pub.toLowerCase()]) {
+        return { level: 1, label: "🤝 Mutual Trust", badgeClass: "badge-vouched", isDirect: false };
+      }
+    }
+  }
+  return { level: 0, label: "⚪ Unvouched", badgeClass: "badge-stranger", isDirect: false };
+}
+
 // State
 let currentIdentity = null;
 let activeChatPeer = null;
@@ -428,8 +506,9 @@ async function checkHealth() {
 // Self-Healing Identity Sync: Ensures local vault identities are active on relay
 async function ensureIdentityRegistered(identity) {
   if (!identity || !identity.username || !identity.privKey) return false;
+  const token = identity.handleToken || await deriveHandleToken(identity.username);
   try {
-    const res = await fetch(`/v1/resolve/${identity.username}`);
+    const res = await fetch(`/v1/resolve/${token}`);
     if (res.ok) {
       const data = await res.json();
       if (data.status === "active" && data.pubkey.toLowerCase() === identity.pubKey.toLowerCase()) {
@@ -439,10 +518,10 @@ async function ensureIdentityRegistered(identity) {
 
     // If relay returned 404 (database reset / fresh instance), re-assert self-sovereign claim
     if (res.status === 404) {
-      console.log(`Relay missing active record for @${identity.username}. Re-registering...`);
+      console.log(`Relay missing active record for identity token. Re-registering...`);
       const timestamp = Math.floor(Date.now() / 1000);
       const nonce = getRandomNonce(16);
-      const msg = `${PROTOCOL_PREFIX}:CLAIM:${identity.username}:${identity.pubKey}:${timestamp}:${nonce}`;
+      const msg = `${PROTOCOL_PREFIX}:CLAIM:${token}:${identity.pubKey}:${timestamp}:${nonce}`;
       const sigBytes = nacl.sign.detached(strToBytes(msg), fromHex(identity.privKey));
       const sigHex = toHex(sigBytes);
 
@@ -450,7 +529,7 @@ async function ensureIdentityRegistered(identity) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          username: identity.username,
+          username: token,
           pubkey: identity.pubKey,
           timestamp,
           nonce,
@@ -458,7 +537,7 @@ async function ensureIdentityRegistered(identity) {
         })
       });
       if (claimRes.ok) {
-        console.log(`Successfully synced @${identity.username} with relay.`);
+        console.log(`Successfully synced identity with relay.`);
         return true;
       }
     }
@@ -492,6 +571,9 @@ async function claimIdentity() {
     return;
   }
 
+  // Derive blinded handle token (Zero-Knowledge Privacy: Relay never sees username)
+  const handleToken = await deriveHandleToken(username);
+
   // Generate Ed25519 keypair
   const keyPair = nacl.sign.keyPair();
   const pubHex = toHex(keyPair.publicKey);
@@ -500,8 +582,8 @@ async function claimIdentity() {
   const timestamp = Math.floor(Date.now() / 1000);
   const nonce = getRandomNonce(16);
 
-  // Format canonical claim payload
-  const msg = `${PROTOCOL_PREFIX}:CLAIM:${username}:${pubHex}:${timestamp}:${nonce}`;
+  // Format canonical claim payload using blinded handle token
+  const msg = `${PROTOCOL_PREFIX}:CLAIM:${handleToken}:${pubHex}:${timestamp}:${nonce}`;
   const sigBytes = nacl.sign.detached(strToBytes(msg), keyPair.secretKey);
   const sigHex = toHex(sigBytes);
 
@@ -510,7 +592,7 @@ async function claimIdentity() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        username,
+        username: handleToken,
         pubkey: pubHex,
         timestamp,
         nonce,
@@ -524,9 +606,10 @@ async function claimIdentity() {
       return;
     }
 
-    // Save to local vault
+    // Save to local vault with handleToken and human handle
     vault.identities.push({
       username,
+      handleToken,
       pubKey: pubHex,
       privKey: privHex,
       version: 1,
@@ -792,10 +875,80 @@ function openConversationWith(username) {
 
   renderConversationsList(document.getElementById("inputFilterChats")?.value || "");
 
+  // Update WoT Trust Badge
+  updateActiveChatTrustBadge();
+
   const msgInput = document.getElementById("inputChatMessage");
   if (msgInput) {
     msgInput.focus();
   }
+}
+
+function updateActiveChatTrustBadge() {
+  const badge = document.getElementById("activeContactTrustBadge");
+  if (!badge || !activeChatPeer) return;
+  const cached = getCachedRecipientKey(activeChatPeer);
+  if (cached && cached.pubkey) {
+    const status = getContactTrustStatus(cached.pubkey);
+    badge.className = `badge ${status.badgeClass}`;
+    badge.innerText = status.label;
+  } else {
+    badge.className = "badge badge-stranger";
+    badge.innerText = "⚪ Unvouched";
+  }
+}
+
+function openTrustVerificationModal() {
+  if (!activeChatPeer) return;
+  const cached = getCachedRecipientKey(activeChatPeer);
+  if (!cached || !cached.pubkey) {
+    showToast("Contact public key not resolved yet.");
+    return;
+  }
+  const modal = document.getElementById("modalTrustVerify");
+  const handleEl = document.getElementById("trustModalHandle");
+  const pubKeyEl = document.getElementById("trustModalPubKey");
+  const statusBadge = document.getElementById("trustModalStatusBadge");
+  const btnEndorse = document.getElementById("btnEndorseDirect");
+  const btnRevoke = document.getElementById("btnRevokeEndorsement");
+
+  if (handleEl) handleEl.innerText = "@" + activeChatPeer;
+  if (pubKeyEl) pubKeyEl.innerText = cached.pubkey;
+
+  const status = getContactTrustStatus(cached.pubkey);
+  if (statusBadge) {
+    statusBadge.className = `badge ${status.badgeClass}`;
+    statusBadge.innerText = status.label;
+  }
+
+  if (status.isDirect) {
+    btnEndorse.style.display = "none";
+    btnRevoke.style.display = "inline-block";
+  } else {
+    btnEndorse.style.display = "inline-block";
+    btnRevoke.style.display = "none";
+  }
+
+  btnEndorse.onclick = () => {
+    signAttestation(cached.pubkey, 2);
+    updateActiveChatTrustBadge();
+    showToast(`Identity @${activeChatPeer} cryptographically verified!`);
+    closeTrustModal();
+  };
+
+  btnRevoke.onclick = () => {
+    revokeAttestation(cached.pubkey);
+    updateActiveChatTrustBadge();
+    showToast(`Trust revoked for @${activeChatPeer}`);
+    closeTrustModal();
+  };
+
+  if (modal) modal.style.display = "flex";
+}
+
+function closeTrustModal() {
+  const modal = document.getElementById("modalTrustVerify");
+  if (modal) modal.style.display = "none";
 }
 
 function backToChatsList() {
@@ -841,7 +994,8 @@ async function submitNewChat() {
   }
 
   try {
-    const res = await fetch(`/v1/resolve/${handle}`);
+    const token = await deriveHandleToken(handle);
+    const res = await fetch(`/v1/resolve/${token}`);
     if (!res.ok) {
       if (status) status.innerText = `Handle @${handle} not found on relay.`;
       return;
@@ -852,6 +1006,7 @@ async function submitNewChat() {
       return;
     }
     setCachedRecipientKey(handle, data);
+    setCachedRecipientKey(token, data);
     closeNewChatModal();
     openConversationWith(handle);
   } catch (err) {
@@ -865,7 +1020,8 @@ async function resolveUser() {
   if (!username) return;
 
   try {
-    const resp = await fetch(`/v1/resolve/${username}`);
+    const token = await deriveHandleToken(username);
+    const resp = await fetch(`/v1/resolve/${token}`);
     if (!resp.ok) {
       alert(`User @${username} not found on relay.`);
       return;
@@ -873,17 +1029,18 @@ async function resolveUser() {
 
     const data = await resp.json();
     setCachedRecipientKey(username, data);
+    setCachedRecipientKey(token, data);
 
     const resultBox = document.getElementById("lookupResultBox");
     resultBox.style.display = "block";
 
-    document.getElementById("lookupUsername").innerText = "@" + data.username;
+    document.getElementById("lookupUsername").innerText = "@" + username;
     document.getElementById("lookupPubKey").innerText = data.pubkey;
     document.getElementById("lookupVersion").innerText = data.version;
     document.getElementById("lookupCreated").innerText = new Date(data.created_at).toLocaleDateString();
 
     const resolvedChatName = document.getElementById("resolvedChatUsername");
-    if (resolvedChatName) resolvedChatName.innerText = data.username;
+    if (resolvedChatName) resolvedChatName.innerText = username;
 
     const badge = document.getElementById("lookupBadge");
     if (data.status === "active") {
@@ -895,7 +1052,7 @@ async function resolveUser() {
     }
 
     document.getElementById("btnChatWithResolved").onclick = () => {
-      openConversationWith(data.username);
+      openConversationWith(username);
     };
   } catch (err) {
     alert("Lookup error: " + err.message);
@@ -923,14 +1080,15 @@ async function sendChatMessage() {
   // Clear input immediately for zero-lag responsiveness
   msgInput.value = "";
 
-  // 1. Resolve recipient key (cached or authoritative query)
+  // 1. Resolve recipient key (cached or authoritative query via blinded token)
   let recipEdPubHex = "";
   const cached = getCachedRecipientKey(recipient);
   if (cached && cached.pubkey) {
     recipEdPubHex = cached.pubkey;
   } else {
     try {
-      const res = await fetch(`/v1/resolve/${recipient}`);
+      const recipientToken = await deriveHandleToken(recipient);
+      const res = await fetch(`/v1/resolve/${recipientToken}`);
       if (!res.ok) {
         alert(`Cannot send: Recipient @${recipient} not found on relay.`);
         msgInput.value = text;
@@ -944,6 +1102,7 @@ async function sendChatMessage() {
       }
       recipEdPubHex = recipData.pubkey;
       setCachedRecipientKey(recipient, recipData);
+      setCachedRecipientKey(recipientToken, recipData);
     } catch (err) {
       alert("Network error resolving recipient: " + err.message);
       msgInput.value = text;
@@ -976,16 +1135,20 @@ async function sendChatMessage() {
     const timestamp = Math.floor(Date.now() / 1000);
     const nonce = getRandomNonce(16);
 
-    const msg = `${PROTOCOL_PREFIX}:SEND:${recipient}:${currentIdentity.username}:${payloadHash}:${timestamp}:${nonce}`;
+    // Blinded Routing Tokens (Zero-Knowledge Metadata on Relay)
+    const recipientToken = await deriveHandleToken(recipient);
+    const senderToken = currentIdentity.handleToken || await deriveHandleToken(currentIdentity.username);
+
+    const msg = `${PROTOCOL_PREFIX}:SEND:${recipientToken}:${senderToken}:${payloadHash}:${timestamp}:${nonce}`;
     const sigBytes = nacl.sign.detached(strToBytes(msg), fromHex(currentIdentity.privKey));
 
-    // 4. Single round-trip send to relay
+    // 4. Single round-trip send to relay with blinded routing tokens
     const resp = await fetch("/v1/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        recipient,
-        sender: currentIdentity.username,
+        recipient: recipientToken,
+        sender: senderToken,
         payload: e2eeEnvelope,
         timestamp,
         nonce,
@@ -1003,8 +1166,8 @@ async function sendChatMessage() {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              recipient,
-              sender: currentIdentity.username,
+              recipient: recipientToken,
+              sender: senderToken,
               payload: e2eeEnvelope,
               timestamp,
               nonce,
@@ -1043,6 +1206,7 @@ async function startRealtimeStream() {
   }
 
   const username = currentIdentity.username;
+  const streamId = currentIdentity.handleToken || await deriveHandleToken(username);
   const storedCursor = localStorage.getItem(`author_cursor_${username}`);
   if (storedCursor) {
     lastSeenMessageId = parseInt(storedCursor, 10) || 0;
@@ -1050,11 +1214,11 @@ async function startRealtimeStream() {
 
   const timestamp = Math.floor(Date.now() / 1000);
   const nonce = getRandomNonce(16);
-  const msg = `${PROTOCOL_PREFIX}:INBOX:${username}:${timestamp}:${nonce}`;
+  const msg = `${PROTOCOL_PREFIX}:INBOX:${streamId}:${timestamp}:${nonce}`;
   const sigBytes = nacl.sign.detached(strToBytes(msg), fromHex(currentIdentity.privKey));
   const sig = toHex(sigBytes);
 
-  const url = `/v1/events?recipient=${encodeURIComponent(username)}&ts=${timestamp}&nonce=${nonce}&sig=${sig}&since_id=${lastSeenMessageId}`;
+  const url = `/v1/events?recipient=${encodeURIComponent(streamId)}&ts=${timestamp}&nonce=${nonce}&sig=${sig}&since_id=${lastSeenMessageId}`;
   eventSource = new EventSource(url);
 
   eventSource.onopen = () => {
@@ -1130,11 +1294,12 @@ async function startRealtimeStream() {
 async function acknowledgeMessages(ids) {
   if (!ids || ids.length === 0 || !currentIdentity) return;
 
+  const streamId = currentIdentity.handleToken || await deriveHandleToken(currentIdentity.username);
   const timestamp = Math.floor(Date.now() / 1000);
   const nonce = getRandomNonce(16);
   const idsSummary = ids.join(",");
 
-  const msg = `${PROTOCOL_PREFIX}:ACK:${currentIdentity.username}:${idsSummary}:${timestamp}:${nonce}`;
+  const msg = `${PROTOCOL_PREFIX}:ACK:${streamId}:${idsSummary}:${timestamp}:${nonce}`;
   const sigBytes = nacl.sign.detached(strToBytes(msg), fromHex(currentIdentity.privKey));
 
   try {
@@ -1142,7 +1307,7 @@ async function acknowledgeMessages(ids) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        recipient: currentIdentity.username,
+        recipient: streamId,
         message_ids: ids,
         timestamp,
         nonce,
@@ -1303,6 +1468,20 @@ function initApp() {
     inputFilter.addEventListener("input", (e) => {
       renderConversationsList(e.target.value);
     });
+  }
+
+  // Web of Trust Verification Handlers
+  const badgeTrust = document.getElementById("activeContactTrustBadge");
+  if (badgeTrust) badgeTrust.onclick = openTrustVerificationModal;
+
+  const btnCloseTrust = document.getElementById("btnCloseTrustModal");
+  if (btnCloseTrust) btnCloseTrust.onclick = closeTrustModal;
+
+  const modalTrustEl = document.getElementById("modalTrustVerify");
+  if (modalTrustEl) {
+    modalTrustEl.onclick = (e) => {
+      if (e.target === modalTrustEl) closeTrustModal();
+    };
   }
 
   // Chat Sending & Inbox Sync
