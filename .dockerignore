@@ -1,0 +1,7 @@
+*.exe
+*.db
+*.db-wal
+*.db-shm
+data/
+scratch/
+.git

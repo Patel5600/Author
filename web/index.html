@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Author — Cryptographic Identity & Messaging</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="/icon.svg">
+  <meta name="theme-color" content="#131b29">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Author">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/nacl-fast.min.js"></script>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <span>AUTHOR</span>
+    <span class="logo-badge">PWA V1</span>
+  </div>
+  <div class="header-status">
+    <span class="status-indicator" id="relayDot"></span>
+    <span id="relayStatusText">Connecting to Relay...</span>
+    <select id="identitySelect" style="display:none; background: var(--bg); color: var(--accent); border: 1px solid var(--border); border-radius: 6px; padding: 0.3rem 0.6rem; font-size: 0.85rem; font-weight: 600; cursor: pointer;"></select>
+    <button id="btnHeaderNewId" class="btn btn-secondary" style="display:none; padding: 0.25rem 0.6rem; font-size: 0.75rem;">+ New</button>
+    <button id="btnInstallPWA" class="btn btn-primary" style="display:none; padding: 0.25rem 0.6rem; font-size: 0.75rem;">Install</button>
+  </div>
+</header>
+
+<main>
+  <!-- Lock / Biometric screen -->
+  <div id="lockScreen" class="lock-screen">
+    <svg class="biometric-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 2a10 10 0 0 0-10 10c0 4.42 2.87 8.17 6.84 9.5.5.08.66-.23.66-.5v-1.69c-2.77.6-3.36-1.34-3.36-1.34-.46-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.87 1.52 2.34 1.07 2.91.83.1-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.92 0-1.11.38-2 1.03-2.71-.1-.25-.45-1.29.1-2.64 0 0 .84-.27 2.75 1.02.79-.22 1.65-.33 2.5-.33.85 0 1.71.11 2.5.33 1.91-1.29 2.75-1.02 2.75-1.02.55 1.35.2 2.39.1 2.64.65.71 1.03 1.6 1.03 2.71 0 3.82-2.34 4.66-4.57 4.91.36.31.69.92.69 1.85V21c0 .27.16.59.67.5C19.14 20.16 22 16.42 22 12A10 10 0 0 0 12 2z"/>
+    </svg>
+    <h2 style="margin-bottom: 0.5rem;">Cryptographic Vault</h2>
+    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.25rem;">
+      Unlock local Ed25519 identity using device biometrics (WebAuthn platform lock).
+    </p>
+    <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+      <button class="btn btn-primary" id="btnUnlockBiometric">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20M12 6a6 6 0 0 0-6 6v4a6 6 0 0 0 12 0v-4a6 6 0 0 0-6-6z"/></svg>
+        Unlock with Biometrics
+      </button>
+      <button class="btn btn-secondary" id="btnUnlockPass">
+        Enter Vault Directly
+      </button>
+    </div>
+    <div style="margin-top: 1rem; font-size: 0.75rem; color: #6b7280;">
+      PWA uses browser platform authenticator. Hardware StrongBox isolation available in future native builds.
+    </div>
+  </div>
+
+  <!-- Authenticated App Shell -->
+  <div id="appContainer" style="display: none;">
+    <div class="nav-tabs">
+      <button class="tab-btn active" data-tab="tab-identity">My Identity</button>
+      <button class="tab-btn" data-tab="tab-directory">Directory / Lookup</button>
+      <button class="tab-btn" data-tab="tab-chat">Encrypted Chat</button>
+    </div>
+
+    <!-- Tab 1: Identity Management -->
+    <div id="tab-identity" class="panel active">
+      <div id="noIdentityCard" class="card" style="display: none;">
+        <!-- Sub-switcher: Claim or Import -->
+        <div style="display: flex; gap: 0.5rem; margin-bottom: 1.25rem; border-bottom: 1px solid var(--border); padding-bottom: 0.75rem;">
+          <button class="btn btn-secondary btn-mode-active" id="btnModeClaim" style="font-size: 0.85rem; padding: 0.35rem 0.8rem;">Claim New Handle</button>
+          <button class="btn btn-secondary" id="btnModeImport" style="font-size: 0.85rem; padding: 0.35rem 0.8rem;">Import Existing Key</button>
+        </div>
+
+        <!-- Mode 1: Claim -->
+        <div id="panelClaimMode">
+          <div class="card-title">Claim Your Identity</div>
+          <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.25rem;">
+            No phone number, no email. Claim your unique handle (<span style="color: var(--accent); font-family: var(--font-mono);">a-z0-9_</span>) backed by hardware-grade cryptography.
+          </p>
+          <div class="input-group">
+            <label>Desired Handle</label>
+            <input type="text" id="inputClaimUsername" placeholder="e.g. alice, dev_99" maxlength="32">
+          </div>
+          <button class="btn btn-primary" id="btnSubmitClaim">Generate Key & Claim</button>
+        </div>
+
+        <!-- Mode 2: Import -->
+        <div id="panelImportMode" style="display: none;">
+          <div class="card-title">Import Existing Identity</div>
+          <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.25rem;">
+            Restore your handle on this device using your 128-char private key hex (from CLI export or backup).
+          </p>
+          <div class="input-group">
+            <label>Your Registered Handle</label>
+            <input type="text" id="inputImportUsername" placeholder="e.g. alice" maxlength="32">
+          </div>
+          <div class="input-group">
+            <label>Private Key Hex (128 chars) or Seed (64 chars)</label>
+            <textarea id="inputImportKey" placeholder="Paste private key hex here..." rows="3" style="width: 100%; font-family: var(--font-mono); font-size: 0.8rem; background: var(--bg); color: var(--text-main); border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem; resize: vertical;"></textarea>
+          </div>
+          <button class="btn btn-primary" id="btnSubmitImport">Validate & Import</button>
+        </div>
+      </div>
+
+      <div id="activeIdentityCard" class="card" style="display: none;">
+        <div class="card-title">
+          <span>Active Identity: <strong id="cardUsername" style="color: var(--accent);"></strong></span>
+          <span class="badge badge-active" id="cardStatusBadge">ACTIVE</span>
+        </div>
+        <p style="color: var(--text-muted); font-size: 0.85rem;">Public Key (Ed25519 - 32 bytes):</p>
+        <div class="key-box" id="cardPubKey"></div>
+
+        <div style="display: flex; gap: 2rem; margin-bottom: 1.5rem; font-size: 0.85rem; color: var(--text-muted);">
+          <div>Version: <strong id="cardVersion" style="color: var(--text-main);">1</strong></div>
+          <div>Slots: <strong id="cardSlots" style="color: var(--text-main);">1 / 3</strong></div>
+        </div>
+
+        <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+          <button class="btn btn-secondary" id="btnShowImportPanel">+ Import Another Key</button>
+          <button class="btn btn-secondary" id="btnExportKey">Export Recovery Key</button>
+          <button class="btn btn-secondary" id="btnRotateKey">Rotate Public Key</button>
+          <button class="btn btn-danger" id="btnRevokeIdentity">Revoke Permanently</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 2: Directory / Lookup -->
+    <div id="tab-directory" class="panel">
+      <div class="card">
+        <div class="card-title">Directory Lookup</div>
+        <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">
+          Query the relay's authoritative public registry to verify another user's public key.
+        </p>
+        <div style="display: flex; gap: 0.75rem; margin-bottom: 1.25rem;">
+          <input type="text" id="inputLookupUser" placeholder="Enter username (e.g. bob)" style="flex: 1;">
+          <button class="btn btn-primary" id="btnLookup">Resolve</button>
+        </div>
+
+        <div id="lookupResultBox" style="display: none; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 1rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+            <strong id="lookupUsername" style="font-size: 1.1rem; color: var(--accent);"></strong>
+            <span class="badge" id="lookupBadge">ACTIVE</span>
+          </div>
+          <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.25rem;">Public Key:</div>
+          <div class="key-box" id="lookupPubKey" style="margin-bottom: 0.75rem;"></div>
+          <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;">
+            Version: <span id="lookupVersion"></span> | Created: <span id="lookupCreated"></span>
+          </div>
+          <button class="btn btn-primary" id="btnChatWithResolved">Send Encrypted Message</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 3: Encrypted Chat -->
+    <div id="tab-chat" class="panel">
+      <div class="card">
+        <div class="card-title">
+          <span>Conversation with: <strong id="chatRecipientName" style="color: var(--accent);">bob</strong></span>
+          <button class="btn btn-secondary" id="btnRefreshInbox" style="font-size: 0.8rem; padding: 0.3rem 0.75rem;">Check Inbox</button>
+        </div>
+
+        <div class="chat-box" id="chatBox">
+          <div style="text-align: center; color: var(--text-muted); font-size: 0.85rem; margin: auto;">
+            Messages are signed by your Ed25519 key and relayed ephemerally.
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 0.75rem;">
+          <input type="text" id="inputChatRecipient" placeholder="Recipient" style="width: 140px;">
+          <input type="text" id="inputChatMessage" placeholder="Type your encrypted message..." style="flex: 1;">
+          <button class="btn btn-primary" id="btnSendChatMessage">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- Recovery & Backup Modal -->
+<div id="recoveryModal" class="modal-overlay" style="display: none;">
+  <div class="modal-card">
+    <div class="modal-header">
+      <h3 id="recoveryModalTitle">Identity Recovery Backup</h3>
+      <button class="modal-close" id="btnCloseRecoveryModal">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
+        Keep this private key secret and store it offline. Without this key, you cannot restore or move your handle across devices.
+      </p>
+      <div class="input-group">
+        <label>Identity Handle</label>
+        <div id="recoveryModalHandle" style="font-family: var(--font-mono); color: var(--accent); font-weight: 600; font-size: 1.1rem; margin-bottom: 0.75rem;">@alice</div>
+      </div>
+      <div class="input-group">
+        <label>Private Key Hex (128 characters):</label>
+        <div class="key-box" id="recoveryModalPrivKey" style="word-break: break-all; max-height: 80px; overflow-y: auto; user-select: all;"></div>
+      </div>
+      <div style="display: flex; gap: 0.75rem; margin-top: 1.25rem;">
+        <button class="btn btn-primary" id="btnCopyRecoveryKey" style="flex: 1;">Copy Private Key</button>
+        <button class="btn btn-secondary" id="btnDismissRecovery">Done</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "name": "Author Identity",
+  "short_name": "Author",
+  "description": "Fast cryptographic self-sovereign identity and messaging without phone or email.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0b0f17",
+  "theme_color": "#131b29",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

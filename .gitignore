@@ -1,0 +1,15 @@
+# Binaries
+*.exe
+relay_linux
+/author
+
+# Data & Databases
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# OS & Temporary
+.DS_Store
+Thumbs.db
+scratch/
