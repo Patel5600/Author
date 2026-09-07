@@ -2,6 +2,14 @@
 
 const PROTOCOL_PREFIX = "author-id:v1";
 
+function getRelayBaseUrl() {
+  try {
+    const custom = localStorage.getItem("author_relay_url");
+    if (custom) return custom.trim().replace(/\/+$/, "");
+  } catch (e) {}
+  return "";
+}
+
 // Utilities
 function toHex(uint8arr) {
   return Array.from(uint8arr)
@@ -146,13 +154,35 @@ function loadChatHistory(username) {
   }
 }
 
-function saveChatHistoryMessage(username, type, text, sender, isE2EE = false, peer = "") {
-  if (!username) return;
+function saveChatHistoryMessage(username, type, text, sender, isE2EE = false, peer = "", msgId = "", status = "Sent") {
+  if (!username) return "";
   const history = loadChatHistory(username);
   const resolvedPeer = (peer || (type === "incoming" ? sender : "")).toLowerCase().trim();
-  history.push({ type, text, sender, isE2EE, peer: resolvedPeer, time: Date.now() });
+  const id = msgId || ("msg_" + getRandomNonce(8));
+  history.push({ id, type, text, sender, isE2EE, peer: resolvedPeer, time: Date.now(), status });
   if (history.length > 200) history.shift();
   localStorage.setItem(getChatHistoryKey(username), JSON.stringify(history));
+  return id;
+}
+
+function updateMessageDeliveryStatus(username, msgId, newStatus) {
+  if (!username || !msgId) return;
+  const history = loadChatHistory(username);
+  let updated = false;
+  for (const m of history) {
+    if (m.id === msgId && m.status !== newStatus) {
+      m.status = newStatus;
+      updated = true;
+      break;
+    }
+  }
+  if (updated) {
+    localStorage.setItem(getChatHistoryKey(username), JSON.stringify(history));
+    const el = document.getElementById("msg_status_" + msgId);
+    if (el) {
+      el.innerText = newStatus;
+    }
+  }
 }
 
 function escapeHtml(str) {
@@ -259,7 +289,7 @@ function renderChatHistory(username, filterPeer = "") {
     return;
   }
   for (const m of filtered) {
-    appendChatMessageDOM(m.type, m.text, m.sender, m.isE2EE);
+    appendChatMessageDOM(m.type, m.text, m.sender, m.isE2EE, m.time, m.status || "Sent", m.id || "");
   }
   box.scrollTop = box.scrollHeight;
 }
@@ -568,7 +598,7 @@ async function refreshUI() {
 
 async function checkHealth() {
   try {
-    const res = await fetch("/health");
+    const res = await fetch(getRelayBaseUrl() + "/health");
     if (res.ok) {
       document.getElementById("relayDot").style.background = "#ffffff";
       document.getElementById("relayStatusText").innerText = "Relay Connected";
@@ -589,10 +619,10 @@ async function ensureIdentityRegistered(identity) {
     identity.handleToken = token;
   }
   try {
-    let res = await fetch(`/v1/resolve/${token}`);
+    let res = await fetch(getRelayBaseUrl() + `/v1/resolve/${token}`);
     if (!res.ok && res.status === 404 && token !== identity.username) {
       // Fallback check for legacy plaintext handle
-      const fallbackRes = await fetch(`/v1/resolve/${encodeURIComponent(identity.username)}`);
+      const fallbackRes = await fetch(getRelayBaseUrl() + `/v1/resolve/${encodeURIComponent(identity.username)}`);
       if (fallbackRes.ok) {
         res = fallbackRes;
       }
@@ -614,7 +644,7 @@ async function ensureIdentityRegistered(identity) {
       const sigBytes = nacl.sign.detached(strToBytes(msg), fromHex(identity.privKey));
       const sigHex = toHex(sigBytes);
 
-      const claimRes = await fetch("/v1/claim", {
+      const claimRes = await fetch(getRelayBaseUrl() + "/v1/claim", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -677,7 +707,7 @@ async function claimIdentity() {
   const sigHex = toHex(sigBytes);
 
   try {
-    const resp = await fetch("/v1/claim", {
+    const resp = await fetch(getRelayBaseUrl() + "/v1/claim", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -740,7 +770,7 @@ async function rotateIdentity() {
   const sigNewBytes = nacl.sign.detached(strToBytes(msg), newKeyPair.secretKey);
 
   try {
-    const resp = await fetch("/v1/rotate", {
+    const resp = await fetch(getRelayBaseUrl() + "/v1/rotate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -794,7 +824,7 @@ async function revokeIdentity() {
   const sigBytes = nacl.sign.detached(strToBytes(msg), privKeyBytes);
 
   try {
-    const resp = await fetch("/v1/revoke", {
+    const resp = await fetch(getRelayBaseUrl() + "/v1/revoke", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -880,7 +910,7 @@ async function importIdentity() {
 
   // Validate against authoritative relay
   try {
-    const res = await fetch(`/v1/resolve/${username}`);
+    const res = await fetch(getRelayBaseUrl() + `/v1/resolve/${username}`);
     if (!res.ok) {
       showToast(`Handle @${username} is not registered on the relay.`);
       return;
@@ -1124,9 +1154,9 @@ async function resolveRecipientBinding(handle) {
 
   // 4. Query relay via blinded token (with plaintext fallback)
   try {
-    let res = await fetch(`/v1/resolve/${token}`);
+    let res = await fetch(getRelayBaseUrl() + `/v1/resolve/${token}`);
     if (!res.ok && res.status === 404 && token !== normalized) {
-      const fallbackRes = await fetch(`/v1/resolve/${encodeURIComponent(normalized)}`);
+      const fallbackRes = await fetch(getRelayBaseUrl() + `/v1/resolve/${encodeURIComponent(normalized)}`);
       if (fallbackRes.ok) {
         res = fallbackRes;
       }
@@ -1263,9 +1293,10 @@ async function sendChatMessage() {
   }
   recipEdPubHex = recipData.pubkey;
 
-  // 2. Optimistic UI: Append immediately and update preview
-  saveChatHistoryMessage(currentIdentity.username, "outgoing", text, currentIdentity.username, true, recipient);
-  appendChatMessageDOM("outgoing", text, currentIdentity.username, true);
+  // 2. Optimistic UI: Append immediately with unique message ID and Sending state
+  const msgId = "msg_" + getRandomNonce(8);
+  saveChatHistoryMessage(currentIdentity.username, "outgoing", text, currentIdentity.username, true, recipient, msgId, "Sending");
+  appendChatMessageDOM("outgoing", text, currentIdentity.username, true, Date.now(), "Sending", msgId);
   renderConversationsList(document.getElementById("inputFilterChats")?.value || "");
 
   // 3. Encrypt in-memory via Curve25519 & XSalsa20-Poly1305
@@ -1273,7 +1304,15 @@ async function sendChatMessage() {
     const recipXPub = ed25519PubToCurve25519(fromHex(recipEdPubHex));
     const ephemKeyPair = nacl.box.keyPair();
     const boxNonce = nacl.randomBytes(24);
-    const ciphertextBytes = nacl.box(strToBytes(text), boxNonce, recipXPub, ephemKeyPair.secretKey);
+
+    const innerPayload = JSON.stringify({
+      v: 1,
+      type: "msg",
+      msg_id: msgId,
+      body: text,
+      sender: currentIdentity.username
+    });
+    const ciphertextBytes = nacl.box(strToBytes(innerPayload), boxNonce, recipXPub, ephemKeyPair.secretKey);
 
     const e2eeEnvelope = JSON.stringify({
       v: 1,
@@ -1296,7 +1335,7 @@ async function sendChatMessage() {
     const sigBytes = nacl.sign.detached(strToBytes(msg), fromHex(currentIdentity.privKey));
 
     // 4. Single round-trip send to relay with blinded routing tokens
-    const resp = await fetch("/v1/send", {
+    const resp = await fetch(getRelayBaseUrl() + "/v1/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1310,12 +1349,14 @@ async function sendChatMessage() {
     });
 
     const data = await resp.json();
-    if (!resp.ok) {
+    if (resp.ok) {
+      updateMessageDeliveryStatus(currentIdentity.username, msgId, "Sent");
+    } else {
       if (resp.status === 404 && data.error && data.error.includes("Sender identity not found")) {
         showToast("Syncing sender identity with relay...");
         const ok = await ensureIdentityRegistered(currentIdentity);
         if (ok) {
-          await fetch("/v1/send", {
+          const retryResp = await fetch(getRelayBaseUrl() + "/v1/send", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -1327,14 +1368,74 @@ async function sendChatMessage() {
               sig: toHex(sigBytes)
             })
           });
-          return;
+          if (retryResp.ok) {
+            updateMessageDeliveryStatus(currentIdentity.username, msgId, "Sent");
+            return;
+          }
         }
       }
+      updateMessageDeliveryStatus(currentIdentity.username, msgId, "Failed");
       showToast("Send error: " + (data.error || "Unknown error"));
     }
   } catch (err) {
     console.error("Send failure:", err);
+    updateMessageDeliveryStatus(currentIdentity.username, msgId, "Failed");
     showToast("Network send failure: " + err.message);
+  }
+}
+
+// Silent End-to-End Delivery Receipt Emission
+async function sendDeliveryReceipt(recipient, targetMsgId) {
+  if (!currentIdentity || !recipient || !targetMsgId) return;
+  const recipData = await resolveRecipientBinding(recipient);
+  if (!recipData || !recipData.pubkey) return;
+
+  try {
+    const recipXPub = ed25519PubToCurve25519(fromHex(recipData.pubkey));
+    const ephemKeyPair = nacl.box.keyPair();
+    const boxNonce = nacl.randomBytes(24);
+
+    const receiptInner = JSON.stringify({
+      v: 1,
+      type: "receipt",
+      target_id: targetMsgId,
+      sender: currentIdentity.username
+    });
+    const ciphertextBytes = nacl.box(strToBytes(receiptInner), boxNonce, recipXPub, ephemKeyPair.secretKey);
+
+    const envelope = JSON.stringify({
+      v: 1,
+      alg: "x25519-xsalsa20-poly1305",
+      ephem_pub: toHex(ephemKeyPair.publicKey),
+      nonce: toHex(boxNonce),
+      ciphertext: toHex(ciphertextBytes),
+      sender: currentIdentity.username
+    });
+
+    const payloadHash = await sha256Hex(envelope);
+    const timestamp = Math.floor(Date.now() / 1000);
+    const nonce = getRandomNonce(16);
+
+    const recipientToken = await deriveHandleToken(recipient);
+    const senderToken = currentIdentity.handleToken || await deriveHandleToken(currentIdentity.username);
+
+    const msg = `${PROTOCOL_PREFIX}:SEND:${recipientToken}:${senderToken}:${payloadHash}:${timestamp}:${nonce}`;
+    const sigBytes = nacl.sign.detached(strToBytes(msg), fromHex(currentIdentity.privKey));
+
+    await fetch(getRelayBaseUrl() + "/v1/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        recipient: recipientToken,
+        sender: senderToken,
+        payload: envelope,
+        timestamp,
+        nonce,
+        sig: toHex(sigBytes)
+      })
+    });
+  } catch (err) {
+    console.error("Delivery receipt error:", err);
   }
 }
 
@@ -1372,7 +1473,7 @@ async function startRealtimeStream() {
   const sig = toHex(sigBytes);
 
   const url = `/v1/events?recipient=${encodeURIComponent(streamId)}&ts=${timestamp}&nonce=${nonce}&sig=${sig}&since_id=${lastSeenMessageId}`;
-  eventSource = new EventSource(url);
+  eventSource = new EventSource(getRelayBaseUrl() + url);
 
   eventSource.onopen = () => {
     document.getElementById("relayDot").style.background = "#ffffff";
@@ -1395,6 +1496,7 @@ async function startRealtimeStream() {
       let bodyText = m.payload;
       let senderName = m.sender;
       let isE2EE = false;
+      let isReceipt = false;
       try {
         const env = JSON.parse(m.payload);
         if (env.alg === "x25519-xsalsa20-poly1305" && env.ephem_pub && env.nonce && env.ciphertext) {
@@ -1403,6 +1505,18 @@ async function startRealtimeStream() {
           if (opened) {
             bodyText = bytesToStr(opened);
             isE2EE = true;
+            try {
+              const inner = JSON.parse(bodyText);
+              if (inner && inner.type === "receipt" && inner.target_id) {
+                isReceipt = true;
+                updateMessageDeliveryStatus(username, inner.target_id, "Delivered");
+              } else if (inner && inner.type === "msg") {
+                bodyText = inner.body || inner.text || bodyText;
+                if (inner.msg_id && (env.sender || m.sender)) {
+                  sendDeliveryReceipt(env.sender || m.sender, inner.msg_id);
+                }
+              }
+            } catch (e) {}
           } else {
             const failSender = (env.sender || m.sender || "").toLowerCase().trim();
             if (failSender) {
@@ -1418,12 +1532,18 @@ async function startRealtimeStream() {
         }
       } catch {}
 
+      // If it was a delivery receipt, acknowledge and do not render as chat bubble
+      if (isReceipt) {
+        await acknowledgeMessages([m.id]);
+        return;
+      }
+
       const peer = (senderName || "").toLowerCase().trim();
       saveChatHistoryMessage(username, "incoming", bodyText, senderName, isE2EE, peer);
       renderConversationsList(document.getElementById("inputFilterChats")?.value || "");
 
       if (activeChatPeer && activeChatPeer === peer) {
-        appendChatMessageDOM("incoming", bodyText, senderName, isE2EE);
+        appendChatMessageDOM("incoming", bodyText, senderName, isE2EE, Date.now());
       } else {
         showToast(`New message from @${senderName}`);
       }
@@ -1461,7 +1581,7 @@ async function acknowledgeMessages(ids) {
   const sigBytes = nacl.sign.detached(strToBytes(msg), fromHex(currentIdentity.privKey));
 
   try {
-    await fetch("/v1/ack", {
+    await fetch(getRelayBaseUrl() + "/v1/ack", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1477,7 +1597,7 @@ async function acknowledgeMessages(ids) {
   }
 }
 
-function appendChatMessageDOM(type, text, sender, isE2EE = false) {
+function appendChatMessageDOM(type, text, sender, isE2EE = false, time = Date.now(), status = "Sent", msgId = "") {
   const box = document.getElementById("chatBox");
   if (!box) return;
   // Remove placeholder if present
@@ -1507,8 +1627,20 @@ function appendChatMessageDOM(type, text, sender, isE2EE = false) {
   const body = document.createElement("div");
   body.innerText = text;
 
+  const footer = document.createElement("div");
+  footer.className = "msg-footer";
+  const timeFormatted = formatChatTime(time);
+  if (type === "outgoing") {
+    const statusText = status || "Sent";
+    const statusSpan = msgId ? `<span style="opacity: 0.4;">·</span> <span class="msg-status" id="msg_status_${escapeHtml(msgId)}">${escapeHtml(statusText)}</span>` : "";
+    footer.innerHTML = `<span>${escapeHtml(timeFormatted)}</span> ${statusSpan}`;
+  } else {
+    footer.innerHTML = `<span>${escapeHtml(timeFormatted)}</span>`;
+  }
+
   div.appendChild(header);
   div.appendChild(body);
+  div.appendChild(footer);
   box.appendChild(div);
   box.scrollTop = box.scrollHeight;
 }
@@ -1643,6 +1775,67 @@ function initApp() {
   if (modalTrustEl) {
     modalTrustEl.onclick = (e) => {
       if (e.target === modalTrustEl) closeTrustModal();
+    };
+  }
+
+  // Relay Settings Modal
+  const btnRelay = document.getElementById("btnHeaderRelay");
+  const modalRelay = document.getElementById("modalRelaySettings");
+  const btnCloseRelay = document.getElementById("btnCloseRelayModal");
+  const btnSaveRelay = document.getElementById("btnSaveRelay");
+  const btnResetRelay = document.getElementById("btnResetRelay");
+  const inputRelay = document.getElementById("inputCustomRelay");
+  const displayRelay = document.getElementById("currentRelayDisplay");
+
+  function openRelayModal() {
+    if (!modalRelay) return;
+    const current = getRelayBaseUrl();
+    if (inputRelay) inputRelay.value = current;
+    if (displayRelay) displayRelay.innerText = current ? current : "Default (" + window.location.origin + ")";
+    modalRelay.style.display = "flex";
+  }
+
+  function closeRelayModal() {
+    if (modalRelay) modalRelay.style.display = "none";
+  }
+
+  if (btnRelay) btnRelay.onclick = openRelayModal;
+  if (btnCloseRelay) btnCloseRelay.onclick = closeRelayModal;
+  if (modalRelay) {
+    modalRelay.onclick = (e) => {
+      if (e.target === modalRelay) closeRelayModal();
+    };
+  }
+
+  if (btnSaveRelay) {
+    btnSaveRelay.onclick = () => {
+      const url = (inputRelay?.value || "").trim().replace(/\/+$/, "");
+      if (url && !url.startsWith("http://") && !url.startsWith("https://")) {
+        showToast("Relay URL must start with http:// or https://");
+        return;
+      }
+      if (url) {
+        localStorage.setItem("author_relay_url", url);
+        showToast("Connected to custom relay: " + url);
+      } else {
+        localStorage.removeItem("author_relay_url");
+        showToast("Switched to default relay.");
+      }
+      closeRelayModal();
+      checkHealth();
+      ensureAllIdentitiesRegistered().then(() => startRealtimeStream());
+    };
+  }
+
+  if (btnResetRelay) {
+    btnResetRelay.onclick = () => {
+      localStorage.removeItem("author_relay_url");
+      if (inputRelay) inputRelay.value = "";
+      if (displayRelay) displayRelay.innerText = "Default (" + window.location.origin + ")";
+      showToast("Reset to default relay.");
+      closeRelayModal();
+      checkHealth();
+      ensureAllIdentitiesRegistered().then(() => startRealtimeStream());
     };
   }
 

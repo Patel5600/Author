@@ -25,6 +25,7 @@
     <span id="relayStatusText">Connecting to Relay...</span>
     <select id="identitySelect" style="display:none; background: var(--bg); color: var(--accent); border: 1px solid var(--border); border-radius: 6px; padding: 0.3rem 0.6rem; font-size: 0.85rem; font-weight: 600; cursor: pointer;"></select>
     <button id="btnHeaderNewId" class="btn btn-secondary" style="display:none; padding: 0.25rem 0.6rem; font-size: 0.75rem;">+ New</button>
+    <button id="btnHeaderRelay" class="btn btn-secondary" style="padding: 0.25rem 0.6rem; font-size: 0.75rem;">Relay</button>
     <button id="btnInstallPWA" class="btn btn-primary" style="display:none; padding: 0.25rem 0.6rem; font-size: 0.75rem;">Install</button>
   </div>
 </header>
@@ -325,6 +326,30 @@
       <div style="display: flex; gap: 0.75rem; margin-top: 1.25rem;">
         <button class="btn btn-primary" id="btnCopyRecoveryKey" style="flex: 1;">Copy Backup Key</button>
         <button class="btn btn-secondary" id="btnDismissRecovery">Done</button>
+      </div>
+    </div>
+  </div>
+<!-- Relay Settings Modal -->
+<div id="modalRelaySettings" class="modal-overlay" style="display: none;">
+  <div class="modal-card">
+    <div class="modal-header">
+      <h3 style="font-size: 1.1rem;">Relay Settings</h3>
+      <button class="modal-close" id="btnCloseRelayModal">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
+        Configure the relay server used for message transport. You can connect to official, community, or self-hosted relays.
+      </p>
+      <div class="input-group">
+        <label>Relay Endpoint URL</label>
+        <input type="text" id="inputCustomRelay" placeholder="Leave empty for default origin">
+      </div>
+      <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 1rem;">
+        Current: <span id="currentRelayDisplay" style="font-family: var(--font-mono); color: var(--text-main);">Default</span>
+      </div>
+      <div style="display: flex; gap: 0.75rem;">
+        <button class="btn btn-primary" id="btnSaveRelay" style="flex: 1;">Save &amp; Reconnect</button>
+        <button class="btn btn-secondary" id="btnResetRelay">Reset Default</button>
       </div>
     </div>
   </div>
