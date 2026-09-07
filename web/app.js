@@ -34,17 +34,19 @@ async function sha256Hex(str) {
 // Curve25519 & E2EE Cryptographic Operations
 const CURVE25519_P = (2n ** 255n) - 19n;
 
-function modInverse(a, m) {
-  let [x, y] = [0n, 1n];
-  let [lastX, lastY] = [1n, 0n];
-  let [b, lastB] = [a, m];
-  while (b !== 0n) {
-    const q = lastB / b;
-    [lastB, b] = [b, lastB % b];
-    [lastX, x] = [x, lastX - q * x];
-    [lastY, y] = [y, lastY - q * y];
+function modPow(base, exp, mod) {
+  let res = 1n;
+  base = base % mod;
+  while (exp > 0n) {
+    if (exp % 2n === 1n) res = (res * base) % mod;
+    base = (base * base) % mod;
+    exp /= 2n;
   }
-  return ((lastX % m) + m) % m;
+  return res;
+}
+
+function modInverse(a, m) {
+  return modPow(a, m - 2n, m);
 }
 
 // Convert 32-byte Ed25519 public key to Curve25519 public key (Montgomery u-coordinate)
@@ -137,26 +139,34 @@ function loadChatHistory(username) {
   }
 }
 
-function saveChatHistoryMessage(username, type, text, sender, isE2EE = false) {
+function saveChatHistoryMessage(username, type, text, sender, isE2EE = false, peer = "") {
   if (!username) return;
   const history = loadChatHistory(username);
-  history.push({ type, text, sender, isE2EE, time: Date.now() });
-  // Limit to last 100 messages locally
-  if (history.length > 100) history.shift();
+  const resolvedPeer = (peer || (type === "incoming" ? sender : "")).toLowerCase().trim();
+  history.push({ type, text, sender, isE2EE, peer: resolvedPeer, time: Date.now() });
+  if (history.length > 200) history.shift();
   localStorage.setItem(getChatHistoryKey(username), JSON.stringify(history));
 }
 
-function renderChatHistory(username) {
+function renderChatHistory(username, filterPeer = "") {
   const box = document.getElementById("chatBox");
   box.innerHTML = "";
   const history = loadChatHistory(username);
-  if (history.length === 0) {
+  const peerNorm = (filterPeer || "").toLowerCase().trim();
+
+  const filtered = history.filter(m => {
+    if (!peerNorm) return true;
+    const mPeer = (m.peer || (m.type === "incoming" ? m.sender : "")).toLowerCase().trim();
+    return !mPeer || mPeer === peerNorm;
+  });
+
+  if (filtered.length === 0) {
     box.innerHTML = `<div style="text-align: center; color: var(--text-muted); font-size: 0.85rem; margin: auto;">
-      Messages are end-to-end encrypted (🔒 E2EE) and pushed in real-time.
+      ${peerNorm ? `No messages yet with @${peerNorm}. Send an encrypted message below!` : "Messages are end-to-end encrypted (🔒 E2EE) and pushed in real-time."}
     </div>`;
     return;
   }
-  for (const m of history) {
+  for (const m of filtered) {
     appendChatMessageDOM(m.type, m.text, m.sender, m.isE2EE);
   }
 }
@@ -250,8 +260,14 @@ async function refreshUI() {
 
     document.getElementById("cardSlots").innerText = `${vault.identities.length} / 3`;
 
-    // Load chat history for current identity
-    renderChatHistory(currentIdentity.username);
+    // Load chat recipient and history for current identity
+    const lastRecip = localStorage.getItem(`author_last_chat_recipient_${currentIdentity.username}`) || "";
+    const recipInput = document.getElementById("inputChatRecipient");
+    const headerName = document.getElementById("chatRecipientName");
+    if (recipInput) recipInput.value = lastRecip;
+    if (headerName) headerName.innerText = lastRecip ? "@" + lastRecip : "(Select Recipient)";
+
+    renderChatHistory(currentIdentity.username, lastRecip);
   }
 
   await checkHealth();
@@ -554,6 +570,30 @@ async function importIdentity() {
   }
 }
 
+function openConversationWith(username) {
+  if (!username) return;
+  username = username.toLowerCase().trim();
+
+  const tabBtn = document.querySelector('[data-tab="tab-chat"]');
+  if (tabBtn) tabBtn.click();
+
+  const recipInput = document.getElementById("inputChatRecipient");
+  if (recipInput) recipInput.value = username;
+
+  const headerName = document.getElementById("chatRecipientName");
+  if (headerName) headerName.innerText = "@" + username;
+
+  if (currentIdentity) {
+    localStorage.setItem(`author_last_chat_recipient_${currentIdentity.username}`, username);
+    renderChatHistory(currentIdentity.username, username);
+  }
+
+  const msgInput = document.getElementById("inputChatMessage");
+  if (msgInput) {
+    msgInput.focus();
+  }
+}
+
 // Directory Lookup
 async function resolveUser() {
   const username = document.getElementById("inputLookupUser").value.trim().toLowerCase();
@@ -575,6 +615,9 @@ async function resolveUser() {
     document.getElementById("lookupVersion").innerText = data.version;
     document.getElementById("lookupCreated").innerText = new Date(data.created_at).toLocaleDateString();
 
+    const resolvedChatName = document.getElementById("resolvedChatUsername");
+    if (resolvedChatName) resolvedChatName.innerText = data.username;
+
     const badge = document.getElementById("lookupBadge");
     if (data.status === "active") {
       badge.className = "badge badge-active";
@@ -585,9 +628,7 @@ async function resolveUser() {
     }
 
     document.getElementById("btnChatWithResolved").onclick = () => {
-      document.querySelector('[data-tab="tab-chat"]').click();
-      document.getElementById("inputChatRecipient").value = data.username;
-      document.getElementById("chatRecipientName").innerText = "@" + data.username;
+      openConversationWith(data.username);
     };
   } catch (err) {
     alert("Lookup error: " + err.message);
@@ -677,8 +718,8 @@ async function sendChatMessage() {
       return;
     }
 
+    saveChatHistoryMessage(currentIdentity.username, "outgoing", text, currentIdentity.username, true, recipient);
     appendChatMessageDOM("outgoing", text, currentIdentity.username, true);
-    saveChatHistoryMessage(currentIdentity.username, "outgoing", text, currentIdentity.username, true);
     document.getElementById("inputChatMessage").value = "";
     showToast("Message encrypted (🔒 E2EE) & sent to @" + recipient);
   } catch (err) {
@@ -752,8 +793,14 @@ function startRealtimeStream() {
         }
       } catch {}
 
-      appendChatMessageDOM("incoming", bodyText, senderName, isE2EE);
-      saveChatHistoryMessage(username, "incoming", bodyText, senderName, isE2EE);
+      saveChatHistoryMessage(username, "incoming", bodyText, senderName, isE2EE, senderName);
+
+      const activeRecip = (document.getElementById("inputChatRecipient").value || "").trim().toLowerCase();
+      if (!activeRecip || activeRecip === senderName.toLowerCase()) {
+        appendChatMessageDOM("incoming", bodyText, senderName, isE2EE);
+      } else {
+        showToast(`New message from @${senderName}`);
+      }
 
       // Acknowledge receipt so relay prunes it
       await acknowledgeMessages([m.id]);
@@ -812,7 +859,24 @@ function appendChatMessageDOM(type, text, sender, isE2EE = false) {
 
   const header = document.createElement("div");
   header.className = "chat-msg-header";
-  header.innerHTML = `<span>@${sender}</span>` + (isE2EE ? ` <span style="color:#00e599; font-size:0.75rem; margin-left:0.4rem;">🔒 E2EE</span>` : "");
+
+  const senderSpan = document.createElement("span");
+  senderSpan.innerText = "@" + sender;
+  senderSpan.title = `Click to chat with @${sender}`;
+  senderSpan.style.cursor = "pointer";
+  senderSpan.style.textDecoration = "underline";
+  senderSpan.onclick = () => openConversationWith(sender);
+
+  header.appendChild(senderSpan);
+
+  if (isE2EE) {
+    const badge = document.createElement("span");
+    badge.style.color = "#00e599";
+    badge.style.fontSize = "0.75rem";
+    badge.style.marginLeft = "0.4rem";
+    badge.innerText = "🔒 E2EE";
+    header.appendChild(badge);
+  }
 
   const body = document.createElement("div");
   body.innerText = text;
@@ -913,6 +977,19 @@ function initApp() {
   document.getElementById("inputChatMessage").addEventListener("keydown", (e) => {
     if (e.key === "Enter") sendChatMessage();
   });
+
+  const inputChatRecip = document.getElementById("inputChatRecipient");
+  if (inputChatRecip) {
+    inputChatRecip.addEventListener("input", (e) => {
+      const val = e.target.value.trim().toLowerCase();
+      const headerName = document.getElementById("chatRecipientName");
+      if (headerName) headerName.innerText = val ? "@" + val : "(Select Recipient)";
+      if (currentIdentity) {
+        localStorage.setItem(`author_last_chat_recipient_${currentIdentity.username}`, val);
+        renderChatHistory(currentIdentity.username, val);
+      }
+    });
+  }
 
   // Cross-tab synchronization
   window.addEventListener("storage", (e) => {

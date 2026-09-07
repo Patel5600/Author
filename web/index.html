@@ -145,7 +145,7 @@
           <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;">
             Version: <span id="lookupVersion"></span> | Created: <span id="lookupCreated"></span>
           </div>
-          <button class="btn btn-primary" id="btnChatWithResolved">Send Encrypted Message</button>
+          <button class="btn btn-primary" id="btnChatWithResolved" style="width: 100%; margin-top: 0.5rem;">💬 Open Chat with @<span id="resolvedChatUsername">user</span></button>
         </div>
       </div>
     </div>
@@ -154,7 +154,7 @@
     <div id="tab-chat" class="panel">
       <div class="card">
         <div class="card-title">
-          <span>Conversation with: <strong id="chatRecipientName" style="color: var(--accent);">bob</strong></span>
+          <span>Conversation with: <strong id="chatRecipientName" style="color: var(--accent);">(Select Recipient)</strong></span>
           <button class="btn btn-secondary" id="btnRefreshInbox" style="font-size: 0.8rem; padding: 0.3rem 0.75rem;">Check Inbox</button>
         </div>
 
@@ -203,6 +203,6 @@
 
 <div id="toast" class="toast"></div>
 
-<script src="/app.js?v=7"></script>
+<script src="/app.js?v=8"></script>
 </body>
 </html>
