@@ -148,8 +148,93 @@ function saveChatHistoryMessage(username, type, text, sender, isE2EE = false, pe
   localStorage.setItem(getChatHistoryKey(username), JSON.stringify(history));
 }
 
+function escapeHtml(str) {
+  if (!str) return "";
+  return str.replace(/[&<>'"]/g, tag => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    "'": '&#39;',
+    '"': '&quot;'
+  }[tag] || tag));
+}
+
+function formatChatTime(ts) {
+  if (!ts) return "";
+  const d = new Date(ts);
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) {
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+  return d.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function getConversations(username) {
+  if (!username) return [];
+  const history = loadChatHistory(username);
+  const convMap = new Map();
+  for (const m of history) {
+    const p = (m.peer || (m.type === "incoming" ? m.sender : "")).toLowerCase().trim();
+    if (!p) continue;
+    convMap.set(p, {
+      peer: p,
+      lastText: m.text,
+      time: m.time || 0,
+      isE2EE: m.isE2EE
+    });
+  }
+  return Array.from(convMap.values()).sort((a, b) => (b.time || 0) - (a.time || 0));
+}
+
+function renderConversationsList(filterQuery = "") {
+  const listEl = document.getElementById("conversationsList");
+  if (!listEl) return;
+  if (!currentIdentity) {
+    listEl.innerHTML = `<div style="text-align: center; color: var(--text-muted); padding: 2rem 1rem; font-size: 0.85rem;">No active identity</div>`;
+    return;
+  }
+
+  const convs = getConversations(currentIdentity.username);
+  const q = (filterQuery || "").toLowerCase().trim();
+  const filtered = q ? convs.filter(c => c.peer.toLowerCase().includes(q)) : convs;
+
+  if (filtered.length === 0) {
+    listEl.innerHTML = `<div style="text-align: center; color: var(--text-muted); padding: 2.5rem 1rem; font-size: 0.85rem;">
+      ${q ? `No chat matching "${escapeHtml(q)}"` : `No conversations yet.<br><span style="color: var(--accent); cursor: pointer; text-decoration: underline;" id="btnListNewChat">Start a new chat</span>`}
+    </div>`;
+    const btnListNew = document.getElementById("btnListNewChat");
+    if (btnListNew) btnListNew.onclick = openNewChatModal;
+    return;
+  }
+
+  listEl.innerHTML = "";
+  filtered.forEach(c => {
+    const item = document.createElement("div");
+    item.className = "chat-item" + (activeChatPeer === c.peer ? " active" : "");
+    item.dataset.peer = c.peer;
+    item.onclick = () => openConversationWith(c.peer);
+
+    const initial = c.peer ? c.peer[0].toUpperCase() : "?";
+    const timeStr = c.time ? formatChatTime(c.time) : "";
+    const preview = (c.lastText || "").length > 36 ? (c.lastText || "").slice(0, 36) + "…" : (c.lastText || "");
+
+    item.innerHTML = `
+      <div class="contact-avatar">${initial}</div>
+      <div class="chat-item-info">
+        <div class="chat-item-row">
+          <span class="chat-item-name">@${escapeHtml(c.peer)}</span>
+          <span class="chat-item-time">${timeStr}</span>
+        </div>
+        <div class="chat-item-preview">${c.isE2EE ? "🔒 " : ""}${escapeHtml(preview)}</div>
+      </div>
+    `;
+    listEl.appendChild(item);
+  });
+}
+
 function renderChatHistory(username, filterPeer = "") {
   const box = document.getElementById("chatBox");
+  if (!box) return;
   box.innerHTML = "";
   const history = loadChatHistory(username);
   const peerNorm = (filterPeer || "").toLowerCase().trim();
@@ -162,17 +247,46 @@ function renderChatHistory(username, filterPeer = "") {
 
   if (filtered.length === 0) {
     box.innerHTML = `<div style="text-align: center; color: var(--text-muted); font-size: 0.85rem; margin: auto;">
-      ${peerNorm ? `No messages yet with @${peerNorm}. Send an encrypted message below!` : "Messages are end-to-end encrypted (🔒 E2EE) and pushed in real-time."}
+      ${peerNorm ? `No messages yet with @${escapeHtml(peerNorm)}. Send an encrypted message below!` : "Messages are end-to-end encrypted (🔒 E2EE) and pushed in real-time."}
     </div>`;
     return;
   }
   for (const m of filtered) {
     appendChatMessageDOM(m.type, m.text, m.sender, m.isE2EE);
   }
+  box.scrollTop = box.scrollHeight;
+}
+
+// In-Memory & LocalStorage Public Key Cache for Sub-100ms Messaging
+const recipientKeyCache = {};
+
+function getCachedRecipientKey(username) {
+  if (!username) return null;
+  const u = username.toLowerCase().trim();
+  if (recipientKeyCache[u]) return recipientKeyCache[u];
+  try {
+    const raw = localStorage.getItem(`author_pk_cache_${u}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      recipientKeyCache[u] = parsed;
+      return parsed;
+    }
+  } catch (e) {}
+  return null;
+}
+
+function setCachedRecipientKey(username, data) {
+  if (!username || !data) return;
+  const u = username.toLowerCase().trim();
+  recipientKeyCache[u] = data;
+  try {
+    localStorage.setItem(`author_pk_cache_${u}`, JSON.stringify(data));
+  } catch (e) {}
 }
 
 // State
 let currentIdentity = null;
+let activeChatPeer = null;
 let eventSource = null;
 let lastSeenMessageId = 0;
 let reconnectTimer = null;
@@ -247,7 +361,14 @@ async function refreshUI() {
   if (!currentIdentity) {
     noIdCard.style.display = "block";
     activeCard.style.display = "none";
-    renderChatHistory("");
+    activeChatPeer = null;
+    renderConversationsList();
+    const emptyState = document.getElementById("chatEmptyState");
+    const activeView = document.getElementById("chatActiveView");
+    if (emptyState) emptyState.style.display = "flex";
+    if (activeView) activeView.style.display = "none";
+    const container = document.querySelector(".messenger-container");
+    if (container) container.classList.remove("in-chat");
   } else {
     noIdCard.style.display = "none";
     activeCard.style.display = "block";
@@ -267,14 +388,23 @@ async function refreshUI() {
 
     document.getElementById("cardSlots").innerText = `${vault.identities.length} / 3`;
 
-    // Load chat recipient and history for current identity
-    const lastRecip = localStorage.getItem(`author_last_chat_recipient_${currentIdentity.username}`) || "";
-    const recipInput = document.getElementById("inputChatRecipient");
-    const headerName = document.getElementById("chatRecipientName");
-    if (recipInput) recipInput.value = lastRecip;
-    if (headerName) headerName.innerText = lastRecip ? "@" + lastRecip : "(Select Recipient)";
+    // Render conversations list
+    renderConversationsList();
 
-    renderChatHistory(currentIdentity.username, lastRecip);
+    const lastRecip = localStorage.getItem(`author_last_chat_recipient_${currentIdentity.username}`) || "";
+    if (activeChatPeer) {
+      openConversationWith(activeChatPeer);
+    } else if (lastRecip && window.innerWidth > 768) {
+      // Desktop auto-opens last active chat
+      openConversationWith(lastRecip);
+    } else {
+      const emptyState = document.getElementById("chatEmptyState");
+      const activeView = document.getElementById("chatActiveView");
+      if (emptyState) emptyState.style.display = "flex";
+      if (activeView) activeView.style.display = "none";
+      const container = document.querySelector(".messenger-container");
+      if (container) container.classList.remove("in-chat");
+    }
   }
 
   await checkHealth();
@@ -633,24 +763,99 @@ async function importIdentity() {
 function openConversationWith(username) {
   if (!username) return;
   username = username.toLowerCase().trim();
+  activeChatPeer = username;
 
   const tabBtn = document.querySelector('[data-tab="tab-chat"]');
-  if (tabBtn) tabBtn.click();
+  if (tabBtn && !tabBtn.classList.contains("active")) {
+    tabBtn.click();
+  }
 
-  const recipInput = document.getElementById("inputChatRecipient");
-  if (recipInput) recipInput.value = username;
+  const container = document.querySelector(".messenger-container");
+  if (container) {
+    container.classList.add("in-chat");
+  }
 
-  const headerName = document.getElementById("chatRecipientName");
-  if (headerName) headerName.innerText = "@" + username;
+  const emptyState = document.getElementById("chatEmptyState");
+  const activeView = document.getElementById("chatActiveView");
+  if (emptyState) emptyState.style.display = "none";
+  if (activeView) activeView.style.display = "flex";
+
+  const handleEl = document.getElementById("activeContactHandle");
+  if (handleEl) handleEl.innerText = "@" + username;
+  const avatarEl = document.getElementById("activeContactAvatar");
+  if (avatarEl) avatarEl.innerText = username[0].toUpperCase();
 
   if (currentIdentity) {
     localStorage.setItem(`author_last_chat_recipient_${currentIdentity.username}`, username);
     renderChatHistory(currentIdentity.username, username);
   }
 
+  renderConversationsList(document.getElementById("inputFilterChats")?.value || "");
+
   const msgInput = document.getElementById("inputChatMessage");
   if (msgInput) {
     msgInput.focus();
+  }
+}
+
+function backToChatsList() {
+  const container = document.querySelector(".messenger-container");
+  if (container) {
+    container.classList.remove("in-chat");
+  }
+}
+
+function openNewChatModal() {
+  const modal = document.getElementById("modalNewChat");
+  const input = document.getElementById("inputNewChatHandle");
+  const status = document.getElementById("newChatStatus");
+  if (status) status.innerText = "";
+  if (input) input.value = "";
+  if (modal) modal.style.display = "flex";
+  if (input) input.focus();
+}
+
+function closeNewChatModal() {
+  const modal = document.getElementById("modalNewChat");
+  if (modal) modal.style.display = "none";
+}
+
+async function submitNewChat() {
+  const input = document.getElementById("inputNewChatHandle");
+  const status = document.getElementById("newChatStatus");
+  const handle = (input?.value || "").toLowerCase().trim();
+  if (!handle) return;
+
+  if (currentIdentity && handle === currentIdentity.username.toLowerCase()) {
+    if (status) status.innerText = "Cannot chat with your own handle.";
+    return;
+  }
+
+  if (status) status.innerText = `Resolving @${handle}...`;
+
+  const cached = getCachedRecipientKey(handle);
+  if (cached && cached.pubkey) {
+    closeNewChatModal();
+    openConversationWith(handle);
+    return;
+  }
+
+  try {
+    const res = await fetch(`/v1/resolve/${handle}`);
+    if (!res.ok) {
+      if (status) status.innerText = `Handle @${handle} not found on relay.`;
+      return;
+    }
+    const data = await res.json();
+    if (data.status === "revoked") {
+      if (status) status.innerText = `Handle @${handle} is revoked.`;
+      return;
+    }
+    setCachedRecipientKey(handle, data);
+    closeNewChatModal();
+    openConversationWith(handle);
+  } catch (err) {
+    if (status) status.innerText = "Network error: " + err.message;
   }
 }
 
@@ -667,6 +872,8 @@ async function resolveUser() {
     }
 
     const data = await resp.json();
+    setCachedRecipientKey(username, data);
+
     const resultBox = document.getElementById("lookupResultBox");
     resultBox.style.display = "block";
 
@@ -702,66 +909,77 @@ async function sendChatMessage() {
     return;
   }
 
-  const recipient = document.getElementById("inputChatRecipient").value.trim().toLowerCase();
-  const text = document.getElementById("inputChatMessage").value.trim();
-
-  if (!recipient || !text) {
-    alert("Recipient and message text required.");
+  if (!activeChatPeer) {
+    alert("Select or start a conversation first.");
     return;
   }
 
-  // 0. Ensure sender identity is registered and active on relay
-  await ensureIdentityRegistered(currentIdentity);
+  const recipient = activeChatPeer.toLowerCase().trim();
+  const msgInput = document.getElementById("inputChatMessage");
+  const text = (msgInput?.value || "").trim();
 
-  // 1. Resolve recipient from relay to get their authoritative Ed25519 public key
+  if (!text) return;
+
+  // Clear input immediately for zero-lag responsiveness
+  msgInput.value = "";
+
+  // 1. Resolve recipient key (cached or authoritative query)
   let recipEdPubHex = "";
-  try {
-    const res = await fetch(`/v1/resolve/${recipient}`);
-    if (!res.ok) {
-      alert(`Cannot send: Recipient @${recipient} not found on relay.\n(Ensure @${recipient} has opened Author to connect to this relay)`);
+  const cached = getCachedRecipientKey(recipient);
+  if (cached && cached.pubkey) {
+    recipEdPubHex = cached.pubkey;
+  } else {
+    try {
+      const res = await fetch(`/v1/resolve/${recipient}`);
+      if (!res.ok) {
+        alert(`Cannot send: Recipient @${recipient} not found on relay.`);
+        msgInput.value = text;
+        return;
+      }
+      const recipData = await res.json();
+      if (recipData.status === "revoked") {
+        alert(`Cannot send: Recipient @${recipient} is permanently revoked.`);
+        msgInput.value = text;
+        return;
+      }
+      recipEdPubHex = recipData.pubkey;
+      setCachedRecipientKey(recipient, recipData);
+    } catch (err) {
+      alert("Network error resolving recipient: " + err.message);
+      msgInput.value = text;
       return;
     }
-    const recipData = await res.json();
-    if (recipData.status === "revoked") {
-      alert(`Cannot send: Recipient @${recipient} is permanently revoked.`);
-      return;
-    }
-    recipEdPubHex = recipData.pubkey;
-  } catch (err) {
-    alert("Network error resolving recipient: " + err.message);
-    return;
   }
 
-  // 2. Convert recipient's Ed25519 public key to Curve25519 (X25519)
-  const recipXPub = ed25519PubToCurve25519(fromHex(recipEdPubHex));
+  // 2. Optimistic UI: Append immediately and update preview
+  saveChatHistoryMessage(currentIdentity.username, "outgoing", text, currentIdentity.username, true, recipient);
+  appendChatMessageDOM("outgoing", text, currentIdentity.username, true);
+  renderConversationsList(document.getElementById("inputFilterChats")?.value || "");
 
-  // 3. Generate ephemeral X25519 keypair for Perfect Forward Secrecy
-  const ephemKeyPair = nacl.box.keyPair();
-
-  // 4. Generate 24-byte random nonce for XSalsa20-Poly1305
-  const boxNonce = nacl.randomBytes(24);
-
-  // 5. Encrypt message text
-  const ciphertextBytes = nacl.box(strToBytes(text), boxNonce, recipXPub, ephemKeyPair.secretKey);
-
-  // 6. Zero-Knowledge E2EE envelope
-  const e2eeEnvelope = JSON.stringify({
-    v: 1,
-    alg: "x25519-xsalsa20-poly1305",
-    ephem_pub: toHex(ephemKeyPair.publicKey),
-    nonce: toHex(boxNonce),
-    ciphertext: toHex(ciphertextBytes),
-    sender: currentIdentity.username
-  });
-
-  const payloadHash = await sha256Hex(e2eeEnvelope);
-  const timestamp = Math.floor(Date.now() / 1000);
-  const nonce = getRandomNonce(16);
-
-  const msg = `${PROTOCOL_PREFIX}:SEND:${recipient}:${currentIdentity.username}:${payloadHash}:${timestamp}:${nonce}`;
-  const sigBytes = nacl.sign.detached(strToBytes(msg), fromHex(currentIdentity.privKey));
-
+  // 3. Encrypt in-memory via Curve25519 & XSalsa20-Poly1305
   try {
+    const recipXPub = ed25519PubToCurve25519(fromHex(recipEdPubHex));
+    const ephemKeyPair = nacl.box.keyPair();
+    const boxNonce = nacl.randomBytes(24);
+    const ciphertextBytes = nacl.box(strToBytes(text), boxNonce, recipXPub, ephemKeyPair.secretKey);
+
+    const e2eeEnvelope = JSON.stringify({
+      v: 1,
+      alg: "x25519-xsalsa20-poly1305",
+      ephem_pub: toHex(ephemKeyPair.publicKey),
+      nonce: toHex(boxNonce),
+      ciphertext: toHex(ciphertextBytes),
+      sender: currentIdentity.username
+    });
+
+    const payloadHash = await sha256Hex(e2eeEnvelope);
+    const timestamp = Math.floor(Date.now() / 1000);
+    const nonce = getRandomNonce(16);
+
+    const msg = `${PROTOCOL_PREFIX}:SEND:${recipient}:${currentIdentity.username}:${payloadHash}:${timestamp}:${nonce}`;
+    const sigBytes = nacl.sign.detached(strToBytes(msg), fromHex(currentIdentity.privKey));
+
+    // 4. Single round-trip send to relay
     const resp = await fetch("/v1/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -781,19 +999,26 @@ async function sendChatMessage() {
         showToast("Syncing sender identity with relay...");
         const ok = await ensureIdentityRegistered(currentIdentity);
         if (ok) {
-          return sendChatMessage();
+          await fetch("/v1/send", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              recipient,
+              sender: currentIdentity.username,
+              payload: e2eeEnvelope,
+              timestamp,
+              nonce,
+              sig: toHex(sigBytes)
+            })
+          });
+          return;
         }
       }
-      alert("Failed to send message: " + (data.error || "Unknown error"));
-      return;
+      showToast("Send error: " + (data.error || "Unknown error"));
     }
-
-    saveChatHistoryMessage(currentIdentity.username, "outgoing", text, currentIdentity.username, true, recipient);
-    appendChatMessageDOM("outgoing", text, currentIdentity.username, true);
-    document.getElementById("inputChatMessage").value = "";
-    showToast("Message encrypted (🔒 E2EE) & sent to @" + recipient);
   } catch (err) {
-    alert("Error sending message: " + err.message);
+    console.error("Send failure:", err);
+    showToast("Network send failure: " + err.message);
   }
 }
 
@@ -871,13 +1096,14 @@ async function startRealtimeStream() {
         }
       } catch {}
 
-      saveChatHistoryMessage(username, "incoming", bodyText, senderName, isE2EE, senderName);
+      const peer = (senderName || "").toLowerCase().trim();
+      saveChatHistoryMessage(username, "incoming", bodyText, senderName, isE2EE, peer);
+      renderConversationsList(document.getElementById("inputFilterChats")?.value || "");
 
-      const activeRecip = (document.getElementById("inputChatRecipient").value || "").trim().toLowerCase();
-      if (!activeRecip || activeRecip === senderName.toLowerCase()) {
+      if (activeChatPeer && activeChatPeer === peer) {
         appendChatMessageDOM("incoming", bodyText, senderName, isE2EE);
       } else {
-        showToast(`New message from @${senderName}`);
+        showToast(`💬 New message from @${senderName}`);
       }
 
       // Acknowledge receipt so relay prunes it
@@ -930,8 +1156,9 @@ async function acknowledgeMessages(ids) {
 
 function appendChatMessageDOM(type, text, sender, isE2EE = false) {
   const box = document.getElementById("chatBox");
+  if (!box) return;
   // Remove placeholder if present
-  if (box.children.length === 1 && box.children[0].innerText.includes("Messages are")) {
+  if (box.children.length === 1 && (box.children[0].innerText.includes("Messages are") || box.children[0].innerText.includes("No messages yet"))) {
     box.innerHTML = "";
   }
 
@@ -943,11 +1170,6 @@ function appendChatMessageDOM(type, text, sender, isE2EE = false) {
 
   const senderSpan = document.createElement("span");
   senderSpan.innerText = "@" + sender;
-  senderSpan.title = `Click to chat with @${sender}`;
-  senderSpan.style.cursor = "pointer";
-  senderSpan.style.textDecoration = "underline";
-  senderSpan.onclick = () => openConversationWith(sender);
-
   header.appendChild(senderSpan);
 
   if (isE2EE) {
@@ -1043,14 +1265,54 @@ function initApp() {
     });
   };
 
+  // Directory Lookup
   document.getElementById("btnLookup").onclick = resolveUser;
+
+  // Chat Navigation & Modals
+  const btnOpenNewChat = document.getElementById("btnOpenNewChatModal");
+  if (btnOpenNewChat) btnOpenNewChat.onclick = openNewChatModal;
+
+  const btnEmptyNewChat = document.getElementById("btnEmptyNewChat");
+  if (btnEmptyNewChat) btnEmptyNewChat.onclick = openNewChatModal;
+
+  const btnCloseModal = document.getElementById("btnCloseNewChatModal");
+  if (btnCloseModal) btnCloseModal.onclick = closeNewChatModal;
+
+  const btnSubmitModal = document.getElementById("btnSubmitNewChat");
+  if (btnSubmitModal) btnSubmitModal.onclick = submitNewChat;
+
+  const inputNewChat = document.getElementById("inputNewChatHandle");
+  if (inputNewChat) {
+    inputNewChat.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") submitNewChat();
+    });
+  }
+
+  const modalNewChatEl = document.getElementById("modalNewChat");
+  if (modalNewChatEl) {
+    modalNewChatEl.onclick = (e) => {
+      if (e.target === modalNewChatEl) closeNewChatModal();
+    };
+  }
+
+  const btnBack = document.getElementById("btnBackToChats");
+  if (btnBack) btnBack.onclick = backToChatsList;
+
+  const inputFilter = document.getElementById("inputFilterChats");
+  if (inputFilter) {
+    inputFilter.addEventListener("input", (e) => {
+      renderConversationsList(e.target.value);
+    });
+  }
+
+  // Chat Sending & Inbox Sync
   document.getElementById("btnSendChatMessage").onclick = sendChatMessage;
 
   const btnRefreshInbox = document.getElementById("btnRefreshInbox");
   if (btnRefreshInbox) {
     btnRefreshInbox.onclick = async () => {
       if (!currentIdentity) return;
-      showToast("Checking inbox...");
+      showToast("Syncing inbox...");
       startRealtimeStream();
     };
   }
@@ -1058,19 +1320,6 @@ function initApp() {
   document.getElementById("inputChatMessage").addEventListener("keydown", (e) => {
     if (e.key === "Enter") sendChatMessage();
   });
-
-  const inputChatRecip = document.getElementById("inputChatRecipient");
-  if (inputChatRecip) {
-    inputChatRecip.addEventListener("input", (e) => {
-      const val = e.target.value.trim().toLowerCase();
-      const headerName = document.getElementById("chatRecipientName");
-      if (headerName) headerName.innerText = val ? "@" + val : "(Select Recipient)";
-      if (currentIdentity) {
-        localStorage.setItem(`author_last_chat_recipient_${currentIdentity.username}`, val);
-        renderChatHistory(currentIdentity.username, val);
-      }
-    });
-  }
 
   // Cross-tab synchronization
   window.addEventListener("storage", (e) => {
