@@ -187,17 +187,25 @@ main {
   flex-direction: column;
 }
 
+#tab-chat.panel.active {
+  padding: 0;
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
 #tab-identity.panel.active,
 #tab-directory.panel.active {
   overflow-y: auto;
-  padding: 1.75rem 1.25rem;
+  padding: 2rem 1.5rem;
   align-items: center;
 }
 
 #tab-identity > div,
 #tab-directory > div {
   width: 100%;
-  max-width: 760px;
+  max-width: 860px;
 }
 
 .card {
@@ -205,8 +213,8 @@ main {
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
   border: 1px solid var(--glass-border);
-  border-radius: 16px;
-  padding: 1.5rem;
+  border-radius: 14px;
+  padding: 1.75rem;
   margin-bottom: 1.25rem;
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.4);
 }
@@ -700,46 +708,6 @@ input[type="text"]:focus, textarea:focus, select:focus {
   align-items: center;
 }
 
-/* Mobile Responsive */
-@media (max-width: 768px) {
-  .messenger-container {
-    height: 100%;
-    border-radius: 0;
-    border: none;
-    margin: 0;
-  }
-
-  .chat-list-pane {
-    width: 100%;
-    max-width: 100%;
-    border-right: none;
-  }
-
-  .conversation-pane {
-    width: 100%;
-  }
-
-  .messenger-container.in-chat .chat-list-pane {
-    display: none !important;
-  }
-
-  .messenger-container:not(.in-chat) .conversation-pane {
-    display: none !important;
-  }
-
-  .btn-back {
-    display: inline-flex;
-  }
-
-  .chat-box {
-    padding: 0.75rem 1rem;
-  }
-
-  .chat-composer {
-    padding: 0.6rem 0.85rem;
-    padding-bottom: max(0.6rem, env(safe-area-inset-bottom));
-  }
-}
 
 /* ── Modals & Overlays (Black Glass) ─────────────────────────── */
 .modal-overlay {
@@ -989,6 +957,27 @@ input[type="text"]:focus, textarea:focus, select:focus {
   .chat-composer {
     padding: 0.65rem 0.85rem;
     padding-bottom: max(0.65rem, env(safe-area-inset-bottom));
+  }
+
+  .chat-composer input[type="text"] {
+    font-size: 16px; /* Prevents iOS Safari input auto-zoom */
+  }
+
+  #tab-identity.panel.active,
+  #tab-directory.panel.active {
+    padding: 1rem 0.75rem;
+  }
+
+  .card {
+    padding: 1.25rem 1rem;
+    border-radius: 12px;
+  }
+
+  .modal-card {
+    width: 92%;
+    max-width: 440px;
+    padding: 1.25rem 1.1rem;
+    border-radius: 14px;
   }
 
   .toast {

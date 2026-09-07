@@ -1,5 +1,18 @@
 // Author Web App Client
 
+const CURRENT_CACHE_VERSION = "21";
+try {
+  const cachedVer = localStorage.getItem("author_cache_version");
+  if (cachedVer !== CURRENT_CACHE_VERSION) {
+    localStorage.setItem("author_cache_version", CURRENT_CACHE_VERSION);
+    if ("caches" in window) {
+      caches.keys().then((keys) => {
+        return Promise.all(keys.filter(k => k !== "author-shell-v" + CURRENT_CACHE_VERSION).map(k => caches.delete(k)));
+      });
+    }
+  }
+} catch (e) {}
+
 const PROTOCOL_PREFIX = "author-id:v1";
 
 function getRelayBaseUrl() {
@@ -299,29 +312,43 @@ function registerConversation(username, peer, preview = "", time = Date.now(), i
   saveConversationRegistry(username, list);
 }
 
-function removeConversation(username, peer) {
+function deleteConversationAndHistory(username, peer) {
   if (!username || !peer) return;
   username = username.toLowerCase().trim();
   peer = peer.toLowerCase().trim();
-  const list = loadConversationRegistry(username).filter(c => c.peer !== peer);
+
+  // 1. Remove from persistent registry
+  const list = loadConversationRegistry(username).filter(c => (c.peer || "").toLowerCase().trim() !== peer);
   saveConversationRegistry(username, list);
+
+  // 2. Remove all messages to/from this peer in chat history
+  const history = loadChatHistory(username).filter(m => {
+    const p = (m.peer || (m.type === "incoming" ? m.sender : "")).toLowerCase().trim();
+    return p !== peer;
+  });
+  localStorage.setItem(getChatHistoryKey(username), JSON.stringify(history));
+
+  // 3. Clear active view and state if deleting currently opened chat
+  if (activeChatPeer && activeChatPeer.toLowerCase().trim() === peer) {
+    activeChatPeer = null;
+    localStorage.removeItem(`author_last_chat_recipient_${username}`);
+    const emptyState = document.getElementById("chatEmptyState");
+    const activeView = document.getElementById("chatActiveView");
+    if (emptyState) emptyState.style.display = "flex";
+    if (activeView) activeView.style.display = "none";
+    const box = document.getElementById("chatBox");
+    if (box) box.innerHTML = "";
+    const container = document.querySelector(".messenger-container");
+    if (container) container.classList.remove("in-chat");
+  }
 }
 
 function removeConversationHandler(peer) {
   if (!currentIdentity || !peer) return;
   peer = peer.toLowerCase().trim();
-  removeConversation(currentIdentity.username, peer);
-  if (activeChatPeer && activeChatPeer.toLowerCase().trim() === peer) {
-    activeChatPeer = null;
-    localStorage.removeItem(`author_last_chat_recipient_${currentIdentity.username}`);
-    const emptyState = document.getElementById("chatEmptyState");
-    const activeView = document.getElementById("chatActiveView");
-    if (emptyState) emptyState.style.display = "flex";
-    if (activeView) activeView.style.display = "none";
-    const container = document.querySelector(".messenger-container");
-    if (container) container.classList.remove("in-chat");
-  }
+  deleteConversationAndHistory(currentIdentity.username, peer);
   renderConversationsList(document.getElementById("inputFilterChats")?.value || "");
+  showToast(`Chat with @${peer} deleted.`);
 }
 
 function getConversations(username) {
@@ -408,6 +435,10 @@ function renderConversationsList(filterQuery = "") {
       e.stopPropagation();
       openConversationWith(c.peer);
     };
+    item.ondblclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
 
     const initial = c.peer ? c.peer[0].toUpperCase() : "?";
     const timeStr = c.time ? formatChatTime(c.time) : "";
@@ -422,7 +453,7 @@ function renderConversationsList(filterQuery = "") {
         </div>
         <div class="chat-item-preview">${escapeHtml(preview)}</div>
       </div>
-      <button class="chat-item-remove" title="Close conversation" onclick="event.stopPropagation(); removeConversationHandler('${escapeHtml(c.peer)}');">&times;</button>
+      <button class="chat-item-remove" title="Delete conversation" onclick="event.stopPropagation(); if (confirm('Delete chat with @${escapeHtml(c.peer)}?')) { removeConversationHandler('${escapeHtml(c.peer)}'); }">&times;</button>
     `;
     listEl.appendChild(item);
   });
@@ -1970,10 +2001,26 @@ function appendChatMessageDOM(type, text, sender, isE2EE = false, time = Date.no
 
 // Event Listeners & App Initialization
 function initApp() {
+  unlockVault();
   checkHealth();
   ensureAllIdentitiesRegistered();
   document.getElementById("btnUnlockBiometric").onclick = attemptBiometricUnlock;
   document.getElementById("btnUnlockPass").onclick = unlockVault;
+
+  // Direct Enter-Key Submission on Claim & Lookup Inputs
+  const inputClaim = document.getElementById("inputClaimUsername");
+  if (inputClaim) {
+    inputClaim.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") claimIdentity();
+    });
+  }
+
+  const inputLookup = document.getElementById("inputLookupUser");
+  if (inputLookup) {
+    inputLookup.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") resolveUser();
+    });
+  }
 
   // Identity Switcher
   document.getElementById("identitySelect").onchange = (e) => {
@@ -2211,6 +2258,16 @@ function initApp() {
       if (!currentIdentity) return;
       showToast("Syncing inbox...");
       startRealtimeStream();
+    };
+  }
+
+  const btnHeaderDeleteChat = document.getElementById("btnHeaderDeleteChat");
+  if (btnHeaderDeleteChat) {
+    btnHeaderDeleteChat.onclick = () => {
+      if (!currentIdentity || !activeChatPeer) return;
+      if (confirm(`Delete conversation and all messages with @${activeChatPeer}?`)) {
+        removeConversationHandler(activeChatPeer);
+      }
     };
   }
 

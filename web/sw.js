@@ -1,6 +1,6 @@
-// Author PWA Service Worker (Cache-First Shell + Network-Only API)
- 
-const CACHE_NAME = "author-shell-v19";
+// Author PWA Service Worker (Network-First Navigation + Cached Assets)
+
+const CACHE_NAME = "author-shell-v21";
 const SHELL_ASSETS = [
   "/",
   "/index.html",
@@ -38,24 +38,33 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Shell assets: cache-first with network update
+  // Navigation requests (HTML pages) -> Network-First, fallback to cache
+  if (event.request.mode === "navigate" || url.pathname === "/" || url.pathname === "/index.html") {
+    event.respondWith(
+      fetch(event.request)
+        .then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200) {
+            const clone = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
+          return networkResponse;
+        })
+        .catch(() => caches.match(event.request).then((cached) => cached || caches.match("/index.html")))
+    );
+    return;
+  }
+
+  // Shell static assets: cache-first with network revalidation
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
-      if (cachedResponse) {
-        // Fetch fresh copy in background to keep cache up to date
-        fetch(event.request).then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, networkResponse));
-          }
-        }).catch(() => {});
-        return cachedResponse;
-      }
-      return fetch(event.request);
-    }).catch(() => {
-      // Offline fallback for navigation requests
-      if (event.request.mode === "navigate") {
-        return caches.match("/index.html");
-      }
+      const fetchPromise = fetch(event.request).then((networkResponse) => {
+        if (networkResponse && networkResponse.status === 200) {
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, networkResponse));
+        }
+        return networkResponse;
+      }).catch(() => {});
+
+      return cachedResponse || fetchPromise;
     })
   );
 });
