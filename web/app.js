@@ -202,8 +202,15 @@ async function attemptBiometricUnlock() {
 function unlockVault() {
   document.getElementById("lockScreen").style.display = "none";
   document.getElementById("appContainer").style.display = "block";
+  const vault = loadVault();
+  if (vault.identities.length > 0 && vault.activeIndex === -1) {
+    vault.activeIndex = 0;
+    saveVault(vault);
+  }
   refreshUI();
-  startRealtimeStream();
+  ensureAllIdentitiesRegistered().then(() => {
+    startRealtimeStream();
+  });
 }
 
 // UI Refresh
@@ -285,6 +292,59 @@ async function checkHealth() {
   } catch {
     document.getElementById("relayDot").style.background = "#ef4444";
     document.getElementById("relayStatusText").innerText = "Relay Offline";
+  }
+}
+
+// Self-Healing Identity Sync: Ensures local vault identities are active on relay
+async function ensureIdentityRegistered(identity) {
+  if (!identity || !identity.username || !identity.privKey) return false;
+  try {
+    const res = await fetch(`/v1/resolve/${identity.username}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.status === "active" && data.pubkey.toLowerCase() === identity.pubKey.toLowerCase()) {
+        return true;
+      }
+    }
+
+    // If relay returned 404 (database reset / fresh instance), re-assert self-sovereign claim
+    if (res.status === 404) {
+      console.log(`Relay missing active record for @${identity.username}. Re-registering...`);
+      const timestamp = Math.floor(Date.now() / 1000);
+      const nonce = getRandomNonce(16);
+      const msg = `${PROTOCOL_PREFIX}:CLAIM:${identity.username}:${identity.pubKey}:${timestamp}:${nonce}`;
+      const sigBytes = nacl.sign.detached(strToBytes(msg), fromHex(identity.privKey));
+      const sigHex = toHex(sigBytes);
+
+      const claimRes = await fetch("/v1/claim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: identity.username,
+          pubkey: identity.pubKey,
+          timestamp,
+          nonce,
+          sig: sigHex
+        })
+      });
+      if (claimRes.ok) {
+        console.log(`Successfully synced @${identity.username} with relay.`);
+        return true;
+      }
+    }
+  } catch (err) {
+    console.error("Identity sync error:", err);
+  }
+  return false;
+}
+
+async function ensureAllIdentitiesRegistered() {
+  const vault = loadVault();
+  if (!vault.identities || vault.identities.length === 0) return;
+  for (const id of vault.identities) {
+    if (id.status !== "revoked") {
+      await ensureIdentityRegistered(id);
+    }
   }
 }
 
@@ -650,12 +710,15 @@ async function sendChatMessage() {
     return;
   }
 
+  // 0. Ensure sender identity is registered and active on relay
+  await ensureIdentityRegistered(currentIdentity);
+
   // 1. Resolve recipient from relay to get their authoritative Ed25519 public key
   let recipEdPubHex = "";
   try {
     const res = await fetch(`/v1/resolve/${recipient}`);
     if (!res.ok) {
-      alert(`Cannot send: Recipient @${recipient} not found on relay.`);
+      alert(`Cannot send: Recipient @${recipient} not found on relay.\n(Ensure @${recipient} has opened Author to connect to this relay)`);
       return;
     }
     const recipData = await res.json();
@@ -714,6 +777,13 @@ async function sendChatMessage() {
 
     const data = await resp.json();
     if (!resp.ok) {
+      if (resp.status === 404 && data.error && data.error.includes("Sender identity not found")) {
+        showToast("Syncing sender identity with relay...");
+        const ok = await ensureIdentityRegistered(currentIdentity);
+        if (ok) {
+          return sendChatMessage();
+        }
+      }
       alert("Failed to send message: " + (data.error || "Unknown error"));
       return;
     }
@@ -728,7 +798,7 @@ async function sendChatMessage() {
 }
 
 // Real-Time SSE Stream with Automatic Reconnect & Cursor Gap-Fill
-function startRealtimeStream() {
+async function startRealtimeStream() {
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
@@ -738,6 +808,14 @@ function startRealtimeStream() {
     eventSource = null;
   }
   if (!currentIdentity || currentIdentity.status === "revoked") return;
+
+  // Self-Healing Identity Sync: Verify identity on relay before opening stream
+  const isRegistered = await ensureIdentityRegistered(currentIdentity);
+  if (!isRegistered) {
+    document.getElementById("relayStatusText").innerText = "Syncing identity...";
+    reconnectTimer = setTimeout(startRealtimeStream, 2000);
+    return;
+  }
 
   const username = currentIdentity.username;
   const storedCursor = localStorage.getItem(`author_cursor_${username}`);
@@ -809,12 +887,15 @@ function startRealtimeStream() {
     }
   });
 
-  eventSource.onerror = () => {
+  eventSource.onerror = async () => {
     console.log("Stream dropped. Reconnecting with fresh token in 3s...");
     document.getElementById("relayStatusText").innerText = "Reconnecting stream...";
     if (eventSource) {
       eventSource.close();
       eventSource = null;
+    }
+    if (currentIdentity) {
+      await ensureIdentityRegistered(currentIdentity);
     }
     reconnectTimer = setTimeout(startRealtimeStream, 3000);
   };

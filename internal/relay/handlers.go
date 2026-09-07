@@ -122,6 +122,20 @@ func (h *Handler) HandleClaim(w http.ResponseWriter, r *http.Request) {
 	// Persist claim in database
 	if err := h.store.CreateIdentity(req.Username, req.PubKey, req.Timestamp); err != nil {
 		if errors.Is(err, ErrIdentityExists) {
+			existing, getErr := h.store.GetIdentity(req.Username)
+			if getErr == nil && existing.PubKey == req.PubKey && existing.Status == protocol.StatusActive {
+				h.respondJSON(w, http.StatusOK, protocol.ApiResponse{
+					Success: true,
+					Message: "Identity already active with this key",
+					Data: map[string]any{
+						"username": req.Username,
+						"pubkey":   req.PubKey,
+						"status":   protocol.StatusActive,
+						"version":  existing.Version,
+					},
+				})
+				return
+			}
 			h.respondError(w, http.StatusConflict, "Username is already claimed")
 			return
 		}
