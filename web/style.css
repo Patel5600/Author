@@ -1,14 +1,14 @@
 :root {
-  --bg: #0b0f17;
-  --surface: #131b29;
-  --surface-hover: #1c273a;
-  --border: #233047;
-  --accent: #00e599;
-  --accent-glow: rgba(0, 229, 153, 0.2);
-  --accent-secondary: #3b82f6;
+  --bg: #080808;
+  --surface: #111111;
+  --surface-hover: #1a1a1a;
+  --border: #2a2a2a;
+  --accent: #ffffff;
+  --accent-glow: rgba(255, 255, 255, 0.1);
+  --accent-secondary: #aaaaaa;
   --danger: #ef4444;
-  --text-main: #f3f4f6;
-  --text-muted: #9ca3af;
+  --text-main: #f0f0f0;
+  --text-muted: #888888;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
@@ -47,8 +47,8 @@ header {
 }
 
 .logo-badge {
-  background: linear-gradient(135deg, var(--accent), var(--accent-secondary));
-  color: #000;
+  background: #ffffff;
+  color: #000000;
   padding: 0.2rem 0.5rem;
   border-radius: 6px;
   font-size: 0.75rem;
@@ -161,7 +161,7 @@ main {
   font-family: var(--font-mono);
   font-size: 0.85rem;
   word-break: break-all;
-  color: #a7f3d0;
+  color: #cccccc;
   margin: 0.5rem 0 1rem 0;
   user-select: all;
 }
@@ -181,13 +181,13 @@ main {
 }
 
 .btn-primary {
-  background: var(--accent);
-  color: #052014;
+  background: #ffffff;
+  color: #000000;
 }
 
 .btn-primary:hover {
-  background: #00ffaa;
-  box-shadow: 0 0 12px var(--accent-glow);
+  background: #e0e0e0;
+  box-shadow: 0 0 12px rgba(255,255,255,0.15);
 }
 
 .btn-secondary {
@@ -197,7 +197,7 @@ main {
 }
 
 .btn-secondary:hover {
-  background: #25334c;
+  background: #222222;
 }
 
 .btn-danger {
@@ -321,15 +321,15 @@ input[type="text"]:focus, textarea:focus {
 }
 
 .chat-item.active {
-  background: #1b263b;
-  border-left: 3px solid var(--accent);
+  background: #1a1a1a;
+  border-left: 3px solid #ffffff;
 }
 
 .contact-avatar {
   width: 38px;
   height: 38px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #1e3a8a, #0f766e);
+  background: #222222;
   color: #fff;
   font-weight: 700;
   display: flex;
@@ -338,6 +338,7 @@ input[type="text"]:focus, textarea:focus {
   font-size: 0.95rem;
   flex-shrink: 0;
   text-transform: uppercase;
+  border: 1px solid var(--border);
 }
 
 .chat-item-info {
@@ -407,7 +408,7 @@ input[type="text"]:focus, textarea:focus {
   display: none;
   background: transparent;
   border: none;
-  color: var(--accent);
+  color: var(--text-main);
   font-size: 1.25rem;
   font-weight: bold;
   cursor: pointer;
@@ -443,10 +444,10 @@ input[type="text"]:focus, textarea:focus {
 
 .chat-msg.outgoing {
   align-self: flex-end;
-  background: #1e3a5f;
-  color: #e0f2fe;
+  background: #1e1e1e;
+  color: #f0f0f0;
   border-bottom-right-radius: 2px;
-  border: 1px solid rgba(59, 130, 246, 0.3);
+  border: 1px solid #333333;
 }
 
 .chat-msg.incoming {
@@ -459,7 +460,7 @@ input[type="text"]:focus, textarea:focus {
 
 .chat-msg-header {
   font-size: 0.75rem;
-  color: var(--accent);
+  color: #aaaaaa;
   margin-bottom: 0.2rem;
   font-weight: 600;
   display: flex;
@@ -618,9 +619,9 @@ input[type="text"]:focus, textarea:focus {
 }
 
 .badge-active {
-  background: rgba(0, 229, 153, 0.15);
-  color: var(--accent);
-  border: 1px solid rgba(0, 229, 153, 0.3);
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.25);
 }
 
 .badge-revoked {
@@ -630,33 +631,150 @@ input[type="text"]:focus, textarea:focus {
 }
 
 .badge-verified {
-  background: rgba(0, 229, 153, 0.18);
-  color: var(--accent);
-  border: 1px solid rgba(0, 229, 153, 0.4);
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.35);
 }
 
 .badge-verified:hover {
-  background: rgba(0, 229, 153, 0.28);
+  background: rgba(255, 255, 255, 0.2);
 }
 
 .badge-vouched {
-  background: rgba(56, 189, 248, 0.18);
-  color: #38bdf8;
-  border: 1px solid rgba(56, 189, 248, 0.4);
+  background: rgba(200, 200, 200, 0.12);
+  color: #cccccc;
+  border: 1px solid rgba(200, 200, 200, 0.3);
 }
 
 .badge-vouched:hover {
-  background: rgba(56, 189, 248, 0.28);
+  background: rgba(200, 200, 200, 0.2);
 }
 
 .badge-stranger {
-  background: rgba(148, 163, 184, 0.15);
+  background: rgba(100, 100, 100, 0.15);
   color: var(--text-muted);
-  border: 1px solid rgba(148, 163, 184, 0.3);
+  border: 1px solid rgba(100, 100, 100, 0.3);
 }
 
 .badge-stranger:hover {
-  background: rgba(148, 163, 184, 0.25);
+  background: rgba(100, 100, 100, 0.25);
   color: var(--text-main);
 }
 
+/* ── Professional Profile Card ──────────────────────────────── */
+.profile-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+  margin-bottom: 1.5rem;
+}
+
+.profile-banner {
+  height: 72px;
+  background: linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 50%, #111111 100%);
+  border-bottom: 1px solid var(--border);
+}
+
+.profile-body {
+  padding: 1.25rem 1.5rem 1.5rem;
+  position: relative;
+}
+
+.profile-avatar {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: #1e1e1e;
+  border: 3px solid var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.75rem;
+  font-weight: 800;
+  color: #ffffff;
+  text-transform: uppercase;
+  margin-top: -40px;
+  margin-bottom: 0.75rem;
+  font-family: var(--font-sans);
+  flex-shrink: 0;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+}
+
+.profile-name-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.profile-handle {
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: var(--text-main);
+  letter-spacing: -0.03em;
+}
+
+.profile-meta {
+  display: flex;
+  gap: 1.5rem;
+  margin: 0.75rem 0 1.25rem 0;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  flex-wrap: wrap;
+}
+
+.profile-meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.profile-meta-value {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.profile-key-section {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.profile-key-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-bottom: 0.35rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.profile-key-value {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: #999999;
+  word-break: break-all;
+  user-select: all;
+  line-height: 1.5;
+}
+
+.profile-actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+/* Trusted Contacts (WoT) section */
+.trust-info-box {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 0.75rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}

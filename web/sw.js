@@ -1,6 +1,6 @@
 // Author PWA Service Worker (Cache-First Shell + Network-Only API)
 
-const CACHE_NAME = "author-shell-v13";
+const CACHE_NAME = "author-shell-v14";
 const SHELL_ASSETS = [
   "/",
   "/index.html",

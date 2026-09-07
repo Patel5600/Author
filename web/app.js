@@ -343,24 +343,24 @@ function revokeAttestation(subjectPub) {
 
 function getContactTrustStatus(subjectPub) {
   if (!currentIdentity || !subjectPub) {
-    return { level: 0, label: "⚪ Unvouched", badgeClass: "badge-stranger", isDirect: false };
+    return { level: 0, label: "Unknown", badgeClass: "badge-stranger", isDirect: false };
   }
   const pub = subjectPub.toLowerCase();
   if (pub === currentIdentity.pubKey.toLowerCase()) {
-    return { level: 2, label: "🛡️ Self Identity", badgeClass: "badge-verified", isDirect: true };
+    return { level: 2, label: "You", badgeClass: "badge-verified", isDirect: true };
   }
   const graph = loadTrustGraph(currentIdentity.username);
   if (graph.direct && graph.direct[pub]) {
-    return { level: 2, label: "🛡️ Verified Direct", badgeClass: "badge-verified", isDirect: true };
+    return { level: 2, label: "✓ Verified", badgeClass: "badge-verified", isDirect: true };
   }
   if (graph.attestations) {
     for (const att of graph.attestations) {
       if (att.subject_pub.toLowerCase() === pub && graph.direct && graph.direct[att.issuer_pub.toLowerCase()]) {
-        return { level: 1, label: "🤝 Mutual Trust", badgeClass: "badge-vouched", isDirect: false };
+        return { level: 1, label: "Trusted via Contact", badgeClass: "badge-vouched", isDirect: false };
       }
     }
   }
-  return { level: 0, label: "⚪ Unvouched", badgeClass: "badge-stranger", isDirect: false };
+  return { level: 0, label: "Unknown", badgeClass: "badge-stranger", isDirect: false };
 }
 
 function renderWoTNetwork() {
@@ -372,7 +372,7 @@ function renderWoTNetwork() {
   if (!listEl) return;
 
   const directKeys = Object.keys(graph.direct || {});
-  if (countEl) countEl.innerText = `${directKeys.length} Vouched`;
+  if (countEl) countEl.innerText = `${directKeys.length} Verified`;
 
   if (directKeys.length === 0) {
     if (emptyEl) emptyEl.style.display = "block";
@@ -399,7 +399,7 @@ function renderWoTNetwork() {
     left.innerHTML = `
       <div style="font-weight: 600; font-size: 0.88rem; color: var(--text-main); display: flex; align-items: center; gap: 0.4rem;">
         <span>${peerDisplay}</span>
-        <span class="badge badge-verified" style="font-size: 0.65rem; padding: 0.1rem 0.35rem;">🛡️ Verified Direct</span>
+        <span class="badge badge-verified" style="font-size: 0.65rem; padding: 0.1rem 0.35rem;">✓ Verified</span>
       </div>
       <div style="font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); margin-top: 0.15rem;">${pub.slice(0, 24)}...</div>
     `;
@@ -526,13 +526,19 @@ async function refreshUI() {
     document.getElementById("cardPubKey").innerText = currentIdentity.pubKey;
     document.getElementById("cardVersion").innerText = currentIdentity.version || 1;
 
+    // Populate profile avatar with first character of handle
+    const avatarEl = document.getElementById("profileAvatar");
+    if (avatarEl) {
+      avatarEl.innerText = currentIdentity.username.charAt(0).toUpperCase();
+    }
+
     const badge = document.getElementById("cardStatusBadge");
     if (currentIdentity.status === "revoked") {
       badge.className = "badge badge-revoked";
-      badge.innerText = "REVOKED";
+      badge.innerText = "Revoked";
     } else {
       badge.className = "badge badge-active";
-      badge.innerText = "ACTIVE";
+      badge.innerText = "Active";
     }
 
     document.getElementById("cardSlots").innerText = `${vault.identities.length} / 3`;
@@ -564,7 +570,7 @@ async function checkHealth() {
   try {
     const res = await fetch("/health");
     if (res.ok) {
-      document.getElementById("relayDot").style.background = "#00e599";
+      document.getElementById("relayDot").style.background = "#ffffff";
       document.getElementById("relayStatusText").innerText = "Relay Connected";
     } else {
       throw new Error();
@@ -977,7 +983,7 @@ function updateActiveChatTrustBadge() {
     badge.innerText = status.label;
   } else {
     badge.className = "badge badge-stranger";
-    badge.innerText = "⚪ Unvouched";
+    badge.innerText = "Unknown";
   }
 }
 
@@ -1162,10 +1168,10 @@ async function resolveUser() {
     const badge = document.getElementById("lookupBadge");
     if (data.status === "active") {
       badge.className = "badge badge-active";
-      badge.innerText = "ACTIVE";
+      badge.innerText = "Active";
     } else {
       badge.className = "badge badge-revoked";
-      badge.innerText = "REVOKED";
+      badge.innerText = "Revoked";
     }
 
     document.getElementById("btnChatWithResolved").onclick = () => {
@@ -1455,10 +1461,10 @@ function appendChatMessageDOM(type, text, sender, isE2EE = false) {
 
   if (isE2EE) {
     const badge = document.createElement("span");
-    badge.style.color = "#00e599";
+    badge.style.color = "#888888";
     badge.style.fontSize = "0.75rem";
     badge.style.marginLeft = "0.4rem";
-    badge.innerText = "🔒 E2EE";
+    badge.innerText = "🔒 Encrypted";
     header.appendChild(badge);
   }
 

@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Author — Cryptographic Identity & Messaging</title>
+  <title>Author — Private Identity & Messaging</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" type="image/svg+xml" href="/icon.svg">
-  <meta name="theme-color" content="#131b29">
+  <meta name="theme-color" content="#111111">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Author">
@@ -35,9 +35,9 @@
     <svg class="biometric-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
       <path d="M12 2a10 10 0 0 0-10 10c0 4.42 2.87 8.17 6.84 9.5.5.08.66-.23.66-.5v-1.69c-2.77.6-3.36-1.34-3.36-1.34-.46-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.87 1.52 2.34 1.07 2.91.83.1-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.92 0-1.11.38-2 1.03-2.71-.1-.25-.45-1.29.1-2.64 0 0 .84-.27 2.75 1.02.79-.22 1.65-.33 2.5-.33.85 0 1.71.11 2.5.33 1.91-1.29 2.75-1.02 2.75-1.02.55 1.35.2 2.39.1 2.64.65.71 1.03 1.6 1.03 2.71 0 3.82-2.34 4.66-4.57 4.91.36.31.69.92.69 1.85V21c0 .27.16.59.67.5C19.14 20.16 22 16.42 22 12A10 10 0 0 0 12 2z"/>
     </svg>
-    <h2 style="margin-bottom: 0.5rem;">Cryptographic Vault</h2>
+    <h2 style="margin-bottom: 0.5rem;">Unlock Author</h2>
     <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.25rem;">
-      Unlock local Ed25519 identity using device biometrics (WebAuthn platform lock).
+      Your identity keys are stored on this device. Unlock with biometrics or skip to enter directly.
     </p>
     <div style="display: flex; flex-direction: column; gap: 0.75rem;">
       <button class="btn btn-primary" id="btnUnlockBiometric">
@@ -45,11 +45,11 @@
         Unlock with Biometrics
       </button>
       <button class="btn btn-secondary" id="btnUnlockPass">
-        Enter Vault Directly
+        Enter Directly
       </button>
     </div>
     <div style="margin-top: 1rem; font-size: 0.75rem; color: #6b7280;">
-      PWA uses browser platform authenticator. Hardware StrongBox isolation available in future native builds.
+      Keys never leave your device. No account, no server login.
     </div>
   </div>
 
@@ -66,77 +66,92 @@
       <div id="noIdentityCard" class="card" style="display: none;">
         <!-- Sub-switcher: Claim or Import -->
         <div style="display: flex; gap: 0.5rem; margin-bottom: 1.25rem; border-bottom: 1px solid var(--border); padding-bottom: 0.75rem;">
-          <button class="btn btn-secondary btn-mode-active" id="btnModeClaim" style="font-size: 0.85rem; padding: 0.35rem 0.8rem;">Claim New Handle</button>
-          <button class="btn btn-secondary" id="btnModeImport" style="font-size: 0.85rem; padding: 0.35rem 0.8rem;">Import Existing Key</button>
+          <button class="btn btn-secondary btn-mode-active" id="btnModeClaim" style="font-size: 0.85rem; padding: 0.35rem 0.8rem;">Claim Handle</button>
+          <button class="btn btn-secondary" id="btnModeImport" style="font-size: 0.85rem; padding: 0.35rem 0.8rem;">Restore Identity</button>
         </div>
 
         <!-- Mode 1: Claim -->
         <div id="panelClaimMode">
           <div class="card-title">Claim Your Identity</div>
           <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.25rem;">
-            No phone number, no email. Claim your unique handle (<span style="color: var(--accent); font-family: var(--font-mono);">a-z0-9_</span>) backed by hardware-grade cryptography.
+            No phone number, no email. Choose a unique handle (<span style="color: var(--text-main); font-family: var(--font-mono);">a-z0-9_</span>) — your keys are generated on this device and never shared.
           </p>
           <div class="input-group">
-            <label>Desired Handle</label>
+            <label>Your Handle</label>
             <input type="text" id="inputClaimUsername" placeholder="e.g. alice, dev_99" maxlength="32">
           </div>
-          <button class="btn btn-primary" id="btnSubmitClaim">Generate Key & Claim</button>
+          <button class="btn btn-primary" id="btnSubmitClaim">Create Identity</button>
         </div>
 
         <!-- Mode 2: Import -->
         <div id="panelImportMode" style="display: none;">
-          <div class="card-title">Import Existing Identity</div>
+          <div class="card-title">Restore Existing Identity</div>
           <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.25rem;">
-            Restore your handle on this device using your 128-char private key hex (from CLI export or backup).
+            Restore your handle on this device using your backup key (128-char or 64-char hex from a previous export).
           </p>
           <div class="input-group">
-            <label>Your Registered Handle</label>
+            <label>Your Handle</label>
             <input type="text" id="inputImportUsername" placeholder="e.g. alice" maxlength="32">
           </div>
           <div class="input-group">
-            <label>Private Key Hex (128 chars) or Seed (64 chars)</label>
-            <textarea id="inputImportKey" placeholder="Paste private key hex here..." rows="3" style="width: 100%; font-family: var(--font-mono); font-size: 0.8rem; background: var(--bg); color: var(--text-main); border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem; resize: vertical;"></textarea>
+            <label>Backup Key</label>
+            <textarea id="inputImportKey" placeholder="Paste your backup key here..." rows="3" style="width: 100%; font-family: var(--font-mono); font-size: 0.8rem; background: var(--bg); color: var(--text-main); border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem; resize: vertical;"></textarea>
           </div>
-          <button class="btn btn-primary" id="btnSubmitImport">Validate & Import</button>
+          <button class="btn btn-primary" id="btnSubmitImport">Restore Identity</button>
         </div>
       </div>
 
-      <div id="activeIdentityCard" class="card" style="display: none;">
-        <div class="card-title">
-          <span>Active Identity: <strong id="cardUsername" style="color: var(--accent);"></strong></span>
-          <span class="badge badge-active" id="cardStatusBadge">ACTIVE</span>
-        </div>
-        <p style="color: var(--text-muted); font-size: 0.85rem;">Public Key (Ed25519 - 32 bytes):</p>
-        <div class="key-box" id="cardPubKey"></div>
+      <!-- Professional Profile Card -->
+      <div id="activeIdentityCard" class="profile-card" style="display: none;">
+        <div class="profile-banner"></div>
+        <div class="profile-body">
+          <div class="profile-avatar" id="profileAvatar">?</div>
+          <div class="profile-name-row">
+            <span class="profile-handle">@<span id="cardUsername"></span></span>
+            <span class="badge badge-active" id="cardStatusBadge">Active</span>
+          </div>
+          <div style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0.1rem;">Author · Self-sovereign identity</div>
 
-        <div style="display: flex; gap: 2rem; margin-bottom: 1.5rem; font-size: 0.85rem; color: var(--text-muted);">
-          <div>Version: <strong id="cardVersion" style="color: var(--text-main);">1</strong></div>
-          <div>Slots: <strong id="cardSlots" style="color: var(--text-main);">1 / 3</strong></div>
-        </div>
+          <div class="profile-meta">
+            <div class="profile-meta-item">
+              <span>Key Version</span>
+              <span class="profile-meta-value" id="cardVersion">1</span>
+            </div>
+            <div class="profile-meta-item">
+              <span>Devices Used</span>
+              <span class="profile-meta-value" id="cardSlots">1 / 3</span>
+            </div>
+          </div>
 
-        <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
-          <button class="btn btn-secondary" id="btnShowImportPanel">+ Import Another Key</button>
-          <button class="btn btn-secondary" id="btnExportKey">Export Recovery Key</button>
-          <button class="btn btn-secondary" id="btnRotateKey">Rotate Public Key</button>
-          <button class="btn btn-danger" id="btnRevokeIdentity">Revoke Permanently</button>
+          <div class="profile-key-section">
+            <div class="profile-key-label">Verification Key (public — safe to share)</div>
+            <div class="profile-key-value" id="cardPubKey"></div>
+          </div>
+
+          <div class="profile-actions">
+            <button class="btn btn-secondary" id="btnShowImportPanel">+ Add Another Identity</button>
+            <button class="btn btn-secondary" id="btnExportKey">Export Backup Key</button>
+            <button class="btn btn-secondary" id="btnRotateKey">Rotate Key</button>
+            <button class="btn btn-danger" id="btnRevokeIdentity">Revoke Identity</button>
+          </div>
         </div>
       </div>
 
-      <!-- Web of Trust Network Card -->
-      <div id="wotCard" class="card" style="margin-top: 1.5rem;">
+      <!-- Trusted Contacts Card -->
+      <div id="wotCard" class="card" style="margin-top: 0;">
         <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
-          <span>🛡️ Web of Trust (Vouched Peers)</span>
-          <span class="badge badge-verified" id="wotVouchedCount">0 Vouched</span>
+          <span>✓ Trusted Contacts</span>
+          <span class="badge badge-verified" id="wotVouchedCount">0 Verified</span>
         </div>
         <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">
-          Contacts you cryptographically cosign with your private key. Trust is rooted in <strong>YOU</strong> — spammers cannot fake trust with bot networks because your device only trusts your verified path.
+          People you've personally verified. Trust is rooted in <strong>you</strong> — bots and fake accounts cannot fake trust because only your verified path counts.
         </p>
         <div id="wotEmptyNotice" style="font-size: 0.82rem; color: var(--text-muted); font-style: italic; margin-bottom: 0.75rem;">
-          You haven't vouched for any peers yet. Search for a contact in Directory Lookup or open a chat to verify their cryptographic key.
+          No verified contacts yet. Open a chat or use Directory Lookup to verify someone.
         </div>
         <div id="wotPeersList" style="display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1rem;"></div>
-        <div style="background: rgba(0, 229, 153, 0.05); border: 1px solid rgba(0, 229, 153, 0.2); border-radius: 8px; padding: 0.75rem; font-size: 0.8rem; color: var(--text-muted);">
-          <strong style="color: var(--accent);">Why Sybil / Spammers Cannot Fake Trust:</strong> Even if an attacker creates 10,000 bots that all vouch for each other in an isolated circle, to your device they are <strong>100% Unvouched Strangers</strong> because there is no cryptographic chain leading back to your root key.
+        <div class="trust-info-box">
+          <strong style="color: var(--text-main);">Why bots can't fake trust:</strong> Even if an attacker creates thousands of fake accounts that verify each other, your device sees them as <strong>Unknown</strong> — there's no chain connecting them back to anyone you trust.
         </div>
       </div>
     </div>
@@ -144,29 +159,29 @@
     <!-- Tab 2: Directory / Lookup -->
     <div id="tab-directory" class="panel">
       <div class="card">
-        <div class="card-title">Directory Lookup</div>
+        <div class="card-title">Find a User</div>
         <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">
-          Query the relay's authoritative public registry to verify another user's public key.
+          Look up another user's handle to verify their identity and start an encrypted chat.
         </p>
         <div style="display: flex; gap: 0.75rem; margin-bottom: 1.25rem;">
-          <input type="text" id="inputLookupUser" placeholder="Enter username (e.g. bob)" style="flex: 1;">
-          <button class="btn btn-primary" id="btnLookup">Resolve</button>
+          <input type="text" id="inputLookupUser" placeholder="Enter handle (e.g. bob)" style="flex: 1;">
+          <button class="btn btn-primary" id="btnLookup">Find</button>
         </div>
 
         <div id="lookupResultBox" style="display: none; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 1rem;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
-            <strong id="lookupUsername" style="font-size: 1.1rem; color: var(--accent);"></strong>
-            <span class="badge" id="lookupBadge">ACTIVE</span>
+            <strong id="lookupUsername" style="font-size: 1.1rem;"></strong>
+            <span class="badge" id="lookupBadge">Active</span>
           </div>
-          <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.25rem;">Public Key:</div>
+          <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.25rem;">Verification Key:</div>
           <div class="key-box" id="lookupPubKey" style="margin-bottom: 0.75rem;"></div>
           <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;">
-            <span>Version: <span id="lookupVersion"></span> | Created: <span id="lookupCreated"></span></span>
-            <span>Trust: <span id="lookupTrustBadge" class="badge badge-stranger">⚪ Unvouched</span></span>
+            <span>Version: <span id="lookupVersion"></span> | Since: <span id="lookupCreated"></span></span>
+            <span>Trust: <span id="lookupTrustBadge" class="badge badge-stranger">Unknown</span></span>
           </div>
           <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
-            <button class="btn btn-primary" id="btnChatWithResolved" style="flex: 1;">💬 Open Chat with @<span id="resolvedChatUsername">user</span></button>
-            <button class="btn btn-secondary" id="btnVerifyResolved" style="flex: 1;">🛡️ Verify & Vouch</button>
+            <button class="btn btn-primary" id="btnChatWithResolved" style="flex: 1;">💬 Chat with @<span id="resolvedChatUsername">user</span></button>
+            <button class="btn btn-secondary" id="btnVerifyResolved" style="flex: 1;">✓ Verify & Trust</button>
           </div>
         </div>
       </div>
@@ -194,9 +209,9 @@
           <!-- Empty State -->
           <div id="chatEmptyState" class="chat-empty-state">
             <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">🔒</div>
-            <div style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.25rem;">Zero-Knowledge Chat</div>
+            <div style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.25rem;">Private Messaging</div>
             <p style="color: var(--text-muted); font-size: 0.85rem; max-width: 300px; text-align: center; margin-bottom: 1rem;">
-              Select a conversation or start a new chat. Messages are encrypted end-to-end on device.
+              Select a conversation or start a new chat. Messages are encrypted and only readable by you and the recipient.
             </p>
             <button class="btn btn-primary btn-sm" id="btnEmptyNewChat">+ Start New Chat</button>
           </div>
@@ -210,14 +225,14 @@
                 <div>
                   <div style="font-weight: 700; font-size: 0.95rem; color: var(--text-main); display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;">
                     <span id="activeContactHandle">@user</span>
-                    <span class="badge badge-active" style="font-size: 0.65rem; padding: 0.1rem 0.35rem;">🔒 E2EE</span>
-                    <span id="activeContactTrustBadge" class="badge badge-stranger" style="font-size: 0.65rem; padding: 0.1rem 0.35rem; cursor: pointer;" title="Click to verify contact identity">⚪ Unvouched</span>
+                    <span class="badge badge-active" style="font-size: 0.65rem; padding: 0.1rem 0.35rem;">🔒 Encrypted</span>
+                    <span id="activeContactTrustBadge" class="badge badge-stranger" style="font-size: 0.65rem; padding: 0.1rem 0.35rem; cursor: pointer;" title="Click to verify contact">Unknown</span>
                   </div>
-                  <div style="font-size: 0.72rem; color: var(--text-muted);" id="activeContactSubtext">Direct Cryptographic Session</div>
+                  <div style="font-size: 0.72rem; color: var(--text-muted);" id="activeContactSubtext">Direct Encrypted Session</div>
                 </div>
               </div>
               <div style="display: flex; align-items: center; gap: 0.5rem;">
-                <button class="btn btn-secondary btn-sm" id="btnHeaderTrustVerify" title="Verify contact cryptographic identity">🛡️ Verify Trust</button>
+                <button class="btn btn-secondary btn-sm" id="btnHeaderTrustVerify" title="Verify this contact">✓ Verify</button>
                 <button class="btn btn-secondary btn-sm" id="btnRefreshInbox" title="Sync Inbox">↻ Sync</button>
               </div>
             </div>
@@ -265,24 +280,24 @@
 <div id="modalTrustVerify" class="modal-overlay" style="display: none;">
   <div class="modal-card">
     <div class="modal-header">
-      <h3 style="font-size: 1.1rem;">Web of Trust Verification</h3>
+      <h3 style="font-size: 1.1rem;">Verify Contact</h3>
       <button class="modal-close" id="btnCloseTrustModal">&times;</button>
     </div>
     <div class="modal-body">
       <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
-        Cryptographically cosign this identity with your private key to establish peer-to-peer trust without any central authority.
+        Mark this contact as verified to confirm you've checked they are who they say they are. No central authority needed — trust is yours alone.
       </p>
       <div style="background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; margin-bottom: 1rem;">
-        <div style="font-weight: 700; font-size: 1rem; color: var(--accent); margin-bottom: 0.35rem;" id="trustModalHandle">@user</div>
-        <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem;">Ed25519 Public Key:</div>
+        <div style="font-weight: 700; font-size: 1rem; margin-bottom: 0.35rem;" id="trustModalHandle">@user</div>
+        <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem;">Verification Key:</div>
         <div class="key-box" id="trustModalPubKey" style="font-size: 0.7rem; max-height: 60px; overflow-y: auto;"></div>
         <div style="margin-top: 0.5rem; font-size: 0.8rem;">
-          Current Status: <span id="trustModalStatusBadge" class="badge">⚪ Unvouched</span>
+          Current Status: <span id="trustModalStatusBadge" class="badge">Unknown</span>
         </div>
       </div>
       <div style="display: flex; gap: 0.75rem;">
-        <button class="btn btn-primary" id="btnEndorseDirect" style="flex: 1;">🛡️ Verify & Endorse</button>
-        <button class="btn btn-danger" id="btnRevokeEndorsement" style="display: none;">Revoke Trust</button>
+        <button class="btn btn-primary" id="btnEndorseDirect" style="flex: 1;">✓ Mark as Verified</button>
+        <button class="btn btn-danger" id="btnRevokeEndorsement" style="display: none;">Remove Verification</button>
       </div>
     </div>
   </div>
@@ -292,23 +307,23 @@
 <div id="recoveryModal" class="modal-overlay" style="display: none;">
   <div class="modal-card">
     <div class="modal-header">
-      <h3 id="recoveryModalTitle">Identity Recovery Backup</h3>
+      <h3 id="recoveryModalTitle">Backup Your Identity</h3>
       <button class="modal-close" id="btnCloseRecoveryModal">&times;</button>
     </div>
     <div class="modal-body">
       <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
-        Keep this private key secret and store it offline. Without this key, you cannot restore or move your handle across devices.
+        Store this backup key somewhere safe and offline. You'll need it to restore your identity on another device.
       </p>
       <div class="input-group">
-        <label>Identity Handle</label>
-        <div id="recoveryModalHandle" style="font-family: var(--font-mono); color: var(--accent); font-weight: 600; font-size: 1.1rem; margin-bottom: 0.75rem;">@alice</div>
+        <label>Handle</label>
+        <div id="recoveryModalHandle" style="font-family: var(--font-mono); font-weight: 600; font-size: 1.1rem; margin-bottom: 0.75rem;">@alice</div>
       </div>
       <div class="input-group">
-        <label>Private Key Hex (128 characters):</label>
+        <label>Backup Key (keep this secret):</label>
         <div class="key-box" id="recoveryModalPrivKey" style="word-break: break-all; max-height: 80px; overflow-y: auto; user-select: all;"></div>
       </div>
       <div style="display: flex; gap: 0.75rem; margin-top: 1.25rem;">
-        <button class="btn btn-primary" id="btnCopyRecoveryKey" style="flex: 1;">Copy Private Key</button>
+        <button class="btn btn-primary" id="btnCopyRecoveryKey" style="flex: 1;">Copy Backup Key</button>
         <button class="btn btn-secondary" id="btnDismissRecovery">Done</button>
       </div>
     </div>
@@ -317,6 +332,6 @@
 
 <div id="toast" class="toast"></div>
 
-<script src="/app.js?v=13"></script>
+<script src="/app.js?v=14"></script>
 </body>
 </html>
