@@ -823,8 +823,8 @@ function appendChatMessageDOM(type, text, sender, isE2EE = false) {
   box.scrollTop = box.scrollHeight;
 }
 
-// Event Listeners
-document.addEventListener("DOMContentLoaded", () => {
+// Event Listeners & App Initialization
+function initApp() {
   checkHealth();
   document.getElementById("btnUnlockBiometric").onclick = attemptBiometricUnlock;
   document.getElementById("btnUnlockPass").onclick = unlockVault;
@@ -901,6 +901,15 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("btnLookup").onclick = resolveUser;
   document.getElementById("btnSendChatMessage").onclick = sendChatMessage;
 
+  const btnRefreshInbox = document.getElementById("btnRefreshInbox");
+  if (btnRefreshInbox) {
+    btnRefreshInbox.onclick = async () => {
+      if (!currentIdentity) return;
+      showToast("Checking inbox...");
+      startRealtimeStream();
+    };
+  }
+
   document.getElementById("inputChatMessage").addEventListener("keydown", (e) => {
     if (e.key === "Enter") sendChatMessage();
   });
@@ -962,4 +971,11 @@ document.addEventListener("DOMContentLoaded", () => {
       console.log("Service worker registration:", err.message);
     });
   }
-});
+}
+
+// Immediate execution if DOM is ready, otherwise on DOMContentLoaded
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initApp);
+} else {
+  initApp();
+}
