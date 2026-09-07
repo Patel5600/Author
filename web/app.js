@@ -507,8 +507,19 @@ async function checkHealth() {
 async function ensureIdentityRegistered(identity) {
   if (!identity || !identity.username || !identity.privKey) return false;
   const token = identity.handleToken || await deriveHandleToken(identity.username);
+  if (!identity.handleToken) {
+    identity.handleToken = token;
+  }
   try {
-    const res = await fetch(`/v1/resolve/${token}`);
+    let res = await fetch(`/v1/resolve/${token}`);
+    if (!res.ok && res.status === 404 && token !== identity.username) {
+      // Fallback check for legacy plaintext handle
+      const fallbackRes = await fetch(`/v1/resolve/${encodeURIComponent(identity.username)}`);
+      if (fallbackRes.ok) {
+        res = fallbackRes;
+      }
+    }
+
     if (res.ok) {
       const data = await res.json();
       if (data.status === "active" && data.pubkey.toLowerCase() === identity.pubKey.toLowerCase()) {
@@ -518,7 +529,7 @@ async function ensureIdentityRegistered(identity) {
 
     // If relay returned 404 (database reset / fresh instance), re-assert self-sovereign claim
     if (res.status === 404) {
-      console.log(`Relay missing active record for identity token. Re-registering...`);
+      console.log(`Relay missing active record for identity token. Re-registering @${identity.username}...`);
       const timestamp = Math.floor(Date.now() / 1000);
       const nonce = getRandomNonce(16);
       const msg = `${PROTOCOL_PREFIX}:CLAIM:${token}:${identity.pubKey}:${timestamp}:${nonce}`;
@@ -537,7 +548,7 @@ async function ensureIdentityRegistered(identity) {
         })
       });
       if (claimRes.ok) {
-        console.log(`Successfully synced identity with relay.`);
+        console.log(`Successfully synced identity @${identity.username} with relay.`);
         return true;
       }
     }
@@ -973,6 +984,38 @@ function closeNewChatModal() {
   if (modal) modal.style.display = "none";
 }
 
+// Universal Recipient Resolver: Caches in memory, checks blinded token, and falls back to plain handle
+async function resolveRecipientBinding(handle) {
+  const normalized = (handle || "").toLowerCase().trim();
+  if (!normalized) return null;
+
+  const cached = getCachedRecipientKey(normalized);
+  if (cached && cached.pubkey) return cached;
+
+  const token = await deriveHandleToken(normalized);
+  const cachedByToken = getCachedRecipientKey(token);
+  if (cachedByToken && cachedByToken.pubkey) return cachedByToken;
+
+  try {
+    let res = await fetch(`/v1/resolve/${token}`);
+    if (!res.ok && res.status === 404 && token !== normalized) {
+      const fallbackRes = await fetch(`/v1/resolve/${encodeURIComponent(normalized)}`);
+      if (fallbackRes.ok) {
+        res = fallbackRes;
+      }
+    }
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    setCachedRecipientKey(normalized, data);
+    setCachedRecipientKey(token, data);
+    return data;
+  } catch (err) {
+    console.error("Resolve error for @" + normalized, err);
+    return null;
+  }
+}
+
 async function submitNewChat() {
   const input = document.getElementById("inputNewChatHandle");
   const status = document.getElementById("newChatStatus");
@@ -986,27 +1029,16 @@ async function submitNewChat() {
 
   if (status) status.innerText = `Resolving @${handle}...`;
 
-  const cached = getCachedRecipientKey(handle);
-  if (cached && cached.pubkey) {
-    closeNewChatModal();
-    openConversationWith(handle);
-    return;
-  }
-
   try {
-    const token = await deriveHandleToken(handle);
-    const res = await fetch(`/v1/resolve/${token}`);
-    if (!res.ok) {
+    const data = await resolveRecipientBinding(handle);
+    if (!data) {
       if (status) status.innerText = `Handle @${handle} not found on relay.`;
       return;
     }
-    const data = await res.json();
     if (data.status === "revoked") {
       if (status) status.innerText = `Handle @${handle} is revoked.`;
       return;
     }
-    setCachedRecipientKey(handle, data);
-    setCachedRecipientKey(token, data);
     closeNewChatModal();
     openConversationWith(handle);
   } catch (err) {
@@ -1020,16 +1052,11 @@ async function resolveUser() {
   if (!username) return;
 
   try {
-    const token = await deriveHandleToken(username);
-    const resp = await fetch(`/v1/resolve/${token}`);
-    if (!resp.ok) {
-      alert(`User @${username} not found on relay.`);
+    const data = await resolveRecipientBinding(username);
+    if (!data) {
+      alert(`User @${username} not found on relay.\n\nNote: If @${username} is registered on another device, make sure that device has opened the app while online to auto-sync its identity.`);
       return;
     }
-
-    const data = await resp.json();
-    setCachedRecipientKey(username, data);
-    setCachedRecipientKey(token, data);
 
     const resultBox = document.getElementById("lookupResultBox");
     resultBox.style.display = "block";
@@ -1082,33 +1109,18 @@ async function sendChatMessage() {
 
   // 1. Resolve recipient key (cached or authoritative query via blinded token)
   let recipEdPubHex = "";
-  const cached = getCachedRecipientKey(recipient);
-  if (cached && cached.pubkey) {
-    recipEdPubHex = cached.pubkey;
-  } else {
-    try {
-      const recipientToken = await deriveHandleToken(recipient);
-      const res = await fetch(`/v1/resolve/${recipientToken}`);
-      if (!res.ok) {
-        alert(`Cannot send: Recipient @${recipient} not found on relay.`);
-        msgInput.value = text;
-        return;
-      }
-      const recipData = await res.json();
-      if (recipData.status === "revoked") {
-        alert(`Cannot send: Recipient @${recipient} is permanently revoked.`);
-        msgInput.value = text;
-        return;
-      }
-      recipEdPubHex = recipData.pubkey;
-      setCachedRecipientKey(recipient, recipData);
-      setCachedRecipientKey(recipientToken, recipData);
-    } catch (err) {
-      alert("Network error resolving recipient: " + err.message);
-      msgInput.value = text;
-      return;
-    }
+  const recipData = await resolveRecipientBinding(recipient);
+  if (!recipData) {
+    alert(`Cannot send: Recipient @${recipient} not found on relay.\n\nMake sure @${recipient} has opened the app while online to register.`);
+    msgInput.value = text;
+    return;
   }
+  if (recipData.status === "revoked") {
+    alert(`Cannot send: Recipient @${recipient} is permanently revoked.`);
+    msgInput.value = text;
+    return;
+  }
+  recipEdPubHex = recipData.pubkey;
 
   // 2. Optimistic UI: Append immediately and update preview
   saveChatHistoryMessage(currentIdentity.username, "outgoing", text, currentIdentity.username, true, recipient);
@@ -1358,6 +1370,7 @@ function appendChatMessageDOM(type, text, sender, isE2EE = false) {
 // Event Listeners & App Initialization
 function initApp() {
   checkHealth();
+  ensureAllIdentitiesRegistered();
   document.getElementById("btnUnlockBiometric").onclick = attemptBiometricUnlock;
   document.getElementById("btnUnlockPass").onclick = unlockVault;
 
@@ -1511,7 +1524,9 @@ function initApp() {
   // Resume & Gap-Fill on Screen Unlock / Tab Switch (Mobile Wake-Up)
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
-      startRealtimeStream();
+      ensureAllIdentitiesRegistered().then(() => {
+        startRealtimeStream();
+      });
     }
   });
 
