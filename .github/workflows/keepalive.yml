@@ -1,0 +1,17 @@
+name: Author Relay Keepalive Cron
+
+on:
+  schedule:
+    # Run every 14 minutes to prevent Render free-tier spinning down
+    - cron: '*/14 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    name: Ping Health Endpoint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Author Relay
+        run: |
+          echo "Pinging https://author-relay.onrender.com/health..."
+          curl -fsS -m 30 https://author-relay.onrender.com/health || echo "Relay is waking up or starting"
