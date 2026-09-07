@@ -254,7 +254,10 @@ async function refreshUI() {
     renderChatHistory(currentIdentity.username);
   }
 
-  // Health check
+  await checkHealth();
+}
+
+async function checkHealth() {
   try {
     const res = await fetch("/health");
     if (res.ok) {
@@ -822,6 +825,7 @@ function appendChatMessageDOM(type, text, sender, isE2EE = false) {
 
 // Event Listeners
 document.addEventListener("DOMContentLoaded", () => {
+  checkHealth();
   document.getElementById("btnUnlockBiometric").onclick = attemptBiometricUnlock;
   document.getElementById("btnUnlockPass").onclick = unlockVault;
 
