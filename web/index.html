@@ -140,7 +140,7 @@
       <!-- Trusted Contacts Card -->
       <div id="wotCard" class="card" style="margin-top: 0;">
         <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
-          <span>✓ Trusted Contacts</span>
+          <span>Trusted Contacts</span>
           <span class="badge badge-verified" id="wotVouchedCount">0 Verified</span>
         </div>
         <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">
@@ -180,8 +180,8 @@
             <span>Trust: <span id="lookupTrustBadge" class="badge badge-stranger">Unknown</span></span>
           </div>
           <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
-            <button class="btn btn-primary" id="btnChatWithResolved" style="flex: 1;">💬 Chat with @<span id="resolvedChatUsername">user</span></button>
-            <button class="btn btn-secondary" id="btnVerifyResolved" style="flex: 1;">✓ Verify & Trust</button>
+            <button class="btn btn-primary" id="btnChatWithResolved" style="flex: 1;">Chat with @<span id="resolvedChatUsername">user</span></button>
+            <button class="btn btn-secondary" id="btnVerifyResolved" style="flex: 1;">Verify & Trust</button>
           </div>
         </div>
       </div>
@@ -208,7 +208,7 @@
         <div class="conversation-pane" id="conversationPane">
           <!-- Empty State -->
           <div id="chatEmptyState" class="chat-empty-state">
-            <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">🔒</div>
+            <div style="font-size: 2.5rem; margin-bottom: 0.5rem;"></div>
             <div style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.25rem;">Private Messaging</div>
             <p style="color: var(--text-muted); font-size: 0.85rem; max-width: 300px; text-align: center; margin-bottom: 1rem;">
               Select a conversation or start a new chat. Messages are encrypted and only readable by you and the recipient.
@@ -225,14 +225,14 @@
                 <div>
                   <div style="font-weight: 700; font-size: 0.95rem; color: var(--text-main); display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;">
                     <span id="activeContactHandle">@user</span>
-                    <span class="badge badge-active" style="font-size: 0.65rem; padding: 0.1rem 0.35rem;">🔒 Encrypted</span>
+                    <span class="badge badge-active" style="font-size: 0.65rem; padding: 0.1rem 0.35rem;">Encrypted</span>
                     <span id="activeContactTrustBadge" class="badge badge-stranger" style="font-size: 0.65rem; padding: 0.1rem 0.35rem; cursor: pointer;" title="Click to verify contact">Unknown</span>
                   </div>
                   <div style="font-size: 0.72rem; color: var(--text-muted);" id="activeContactSubtext">Direct Encrypted Session</div>
                 </div>
               </div>
               <div style="display: flex; align-items: center; gap: 0.5rem;">
-                <button class="btn btn-secondary btn-sm" id="btnHeaderTrustVerify" title="Verify this contact">✓ Verify</button>
+                <button class="btn btn-secondary btn-sm" id="btnHeaderTrustVerify" title="Verify this contact">Verify</button>
                 <button class="btn btn-secondary btn-sm" id="btnRefreshInbox" title="Sync Inbox">↻ Sync</button>
               </div>
             </div>
@@ -296,7 +296,7 @@
         </div>
       </div>
       <div style="display: flex; gap: 0.75rem;">
-        <button class="btn btn-primary" id="btnEndorseDirect" style="flex: 1;">✓ Mark as Verified</button>
+        <button class="btn btn-primary" id="btnEndorseDirect" style="flex: 1;">Mark as Verified</button>
         <button class="btn btn-danger" id="btnRevokeEndorsement" style="display: none;">Remove Verification</button>
       </div>
     </div>
@@ -332,6 +332,6 @@
 
 <div id="toast" class="toast"></div>
 
-<script src="/app.js?v=14"></script>
+<script src="/app.js?v=15"></script>
 </body>
 </html>

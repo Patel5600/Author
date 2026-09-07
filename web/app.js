@@ -232,7 +232,7 @@ function renderConversationsList(filterQuery = "") {
           <span class="chat-item-name">@${escapeHtml(c.peer)}</span>
           <span class="chat-item-time">${timeStr}</span>
         </div>
-        <div class="chat-item-preview">${c.isE2EE ? "🔒 " : ""}${escapeHtml(preview)}</div>
+        <div class="chat-item-preview">${c.isE2EE ? "" : ""}${escapeHtml(preview)}</div>
       </div>
     `;
     listEl.appendChild(item);
@@ -254,7 +254,7 @@ function renderChatHistory(username, filterPeer = "") {
 
   if (filtered.length === 0) {
     box.innerHTML = `<div style="text-align: center; color: var(--text-muted); font-size: 0.85rem; margin: auto;">
-      ${peerNorm ? `No messages yet with @${escapeHtml(peerNorm)}. Send an encrypted message below!` : "Messages are end-to-end encrypted (🔒 E2EE) and pushed in real-time."}
+      ${peerNorm ? `No messages yet with @${escapeHtml(peerNorm)}. Send an encrypted message below!` : "Messages are end-to-end encrypted (E2EE) and pushed in real-time."}
     </div>`;
     return;
   }
@@ -351,7 +351,7 @@ function getContactTrustStatus(subjectPub) {
   }
   const graph = loadTrustGraph(currentIdentity.username);
   if (graph.direct && graph.direct[pub]) {
-    return { level: 2, label: "✓ Verified", badgeClass: "badge-verified", isDirect: true };
+    return { level: 2, label: "Verified", badgeClass: "badge-verified", isDirect: true };
   }
   if (graph.attestations) {
     for (const att of graph.attestations) {
@@ -399,7 +399,7 @@ function renderWoTNetwork() {
     left.innerHTML = `
       <div style="font-weight: 600; font-size: 0.88rem; color: var(--text-main); display: flex; align-items: center; gap: 0.4rem;">
         <span>${peerDisplay}</span>
-        <span class="badge badge-verified" style="font-size: 0.65rem; padding: 0.1rem 0.35rem;">✓ Verified</span>
+        <span class="badge badge-verified" style="font-size: 0.65rem; padding: 0.1rem 0.35rem;">Verified</span>
       </div>
       <div style="font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); margin-top: 0.15rem;">${pub.slice(0, 24)}...</div>
     `;
@@ -411,7 +411,7 @@ function renderWoTNetwork() {
     if (att.handle) {
       const btnChat = document.createElement("button");
       btnChat.className = "btn btn-secondary btn-sm";
-      btnChat.innerText = "💬 Chat";
+      btnChat.innerText = "Chat";
       btnChat.onclick = () => openConversationWith(att.handle);
       right.appendChild(btnChat);
     }
@@ -650,13 +650,13 @@ async function ensureAllIdentitiesRegistered() {
 async function claimIdentity() {
   const username = document.getElementById("inputClaimUsername").value.trim().toLowerCase();
   if (!username) {
-    alert("Please enter a username.");
+    showToast("Please enter a handle.");
     return;
   }
 
   const vault = loadVault();
   if (vault.identities.length >= 3) {
-    alert("Device limit reached (max 3 identities allowed per install).");
+    showToast("Device limit reached - max 3 identities per install.");
     return;
   }
 
@@ -691,7 +691,7 @@ async function claimIdentity() {
 
     const data = await resp.json();
     if (!resp.ok) {
-      alert("Claim failed: " + (data.error || "Unknown error"));
+      showToast("Claim failed: " + (data.error || "Unknown error"));
       return;
     }
 
@@ -712,13 +712,13 @@ async function claimIdentity() {
     startRealtimeStream();
     openRecoveryModal("Identity Created — Save Recovery Key", username, privHex);
   } catch (err) {
-    alert("Network error claiming identity: " + err.message);
+    showToast("Network error: " + err.message);
   }
 }
 
 async function rotateIdentity() {
   if (!currentIdentity || currentIdentity.status === "revoked") {
-    alert("Cannot rotate: No active identity.");
+    showToast("No active identity to rotate.");
     return;
   }
 
@@ -757,7 +757,7 @@ async function rotateIdentity() {
 
     const data = await resp.json();
     if (!resp.ok) {
-      alert("Rotation failed: " + (data.error || "Unknown error"));
+      showToast("Rotation failed: " + (data.error || "Unknown error"));
       return;
     }
 
@@ -772,13 +772,13 @@ async function rotateIdentity() {
     refreshUI();
     startRealtimeStream();
   } catch (err) {
-    alert("Network error rotating key: " + err.message);
+    showToast("Network error: " + err.message);
   }
 }
 
 async function revokeIdentity() {
   if (!currentIdentity || currentIdentity.status === "revoked") {
-    alert("Already revoked or not active.");
+    showToast("Identity is already revoked or not active.");
     return;
   }
 
@@ -808,7 +808,7 @@ async function revokeIdentity() {
 
     const data = await resp.json();
     if (!resp.ok) {
-      alert("Revocation failed: " + (data.error || "Unknown error"));
+      showToast("Revocation failed: " + (data.error || "Unknown error"));
       return;
     }
 
@@ -819,7 +819,7 @@ async function revokeIdentity() {
     showToast(`Identity @${currentIdentity.username} revoked.`);
     refreshUI();
   } catch (err) {
-    alert("Network error revoking identity: " + err.message);
+    showToast("Network error: " + err.message);
   }
 }
 
@@ -844,11 +844,11 @@ async function importIdentity() {
   let keyHex = document.getElementById("inputImportKey").value.trim();
 
   if (!username) {
-    alert("Please enter your registered handle.");
+    showToast("Please enter your handle.");
     return;
   }
   if (!keyHex) {
-    alert("Please paste your private key hex.");
+    showToast("Please paste your backup key.");
     return;
   }
 
@@ -867,11 +867,11 @@ async function importIdentity() {
       const secretBytes = fromHex(keyHex);
       keyPair = nacl.sign.keyPair.fromSecretKey(secretBytes);
     } else {
-      alert(`Invalid key length (${keyHex.length} hex characters). Expected 128 characters (64-byte secret key) or 64 characters (32-byte seed).`);
+      showToast(`Invalid key length (${keyHex.length} chars). Expected 128 or 64 hex characters.`);
       return;
     }
   } catch (err) {
-    alert("Error decoding private key hex: " + err.message);
+    showToast("Error reading backup key: " + err.message);
     return;
   }
 
@@ -882,13 +882,13 @@ async function importIdentity() {
   try {
     const res = await fetch(`/v1/resolve/${username}`);
     if (!res.ok) {
-      alert(`Handle @${username} is not registered on the relay. Please verify the handle spelling.`);
+      showToast(`Handle @${username} is not registered on the relay.`);
       return;
     }
 
     const relayIdentity = await res.json();
     if (relayIdentity.pubkey.toLowerCase() !== derivedPubHex.toLowerCase()) {
-      alert(`Verification Failed!\n\nThe provided private key derives public key:\n${derivedPubHex}\n\nBut relay has registered:\n${relayIdentity.pubkey}\n\nThis key does not own @${username}.`);
+      showToast(`Key mismatch — this backup key does not own @${username}.`);
       return;
     }
 
@@ -907,7 +907,7 @@ async function importIdentity() {
       vault.activeIndex = existingIndex;
     } else {
       if (vault.identities.length >= 3) {
-        alert("Device limit reached (max 3 identities allowed per install). Revoke or remove an identity first.");
+        showToast("Device limit reached — max 3 identities. Revoke one first.");
         return;
       }
       vault.identities.push({
@@ -928,7 +928,7 @@ async function importIdentity() {
     refreshUI();
     startRealtimeStream();
   } catch (err) {
-    alert("Network error verifying identity with relay: " + err.message);
+    showToast("Network error: " + err.message);
   }
 }
 
@@ -1080,11 +1080,12 @@ function closeNewChatModal() {
   if (modal) modal.style.display = "none";
 }
 
-// Universal Recipient Resolver: Caches in memory, checks blinded token, and falls back to plain handle
+// Universal Recipient Resolver: Caches in storage, checks local vault, trust graph, blinded token, and plain handle
 async function resolveRecipientBinding(handle) {
   const normalized = (handle || "").toLowerCase().trim();
   if (!normalized) return null;
 
+  // 1. Check in-memory / localStorage cache
   const cached = getCachedRecipientKey(normalized);
   if (cached && cached.pubkey) return cached;
 
@@ -1092,6 +1093,36 @@ async function resolveRecipientBinding(handle) {
   const cachedByToken = getCachedRecipientKey(token);
   if (cachedByToken && cachedByToken.pubkey) return cachedByToken;
 
+  // 2. Check local vault (in case user has multiple identities on this device)
+  try {
+    const vault = loadVault();
+    const localMatch = vault.identities.find(id => id.username && id.username.toLowerCase() === normalized);
+    if (localMatch && localMatch.pubKey) {
+      const data = { username: normalized, pubkey: localMatch.pubKey, status: localMatch.status || "active", version: localMatch.version || 1 };
+      setCachedRecipientKey(normalized, data);
+      setCachedRecipientKey(token, data);
+      return data;
+    }
+  } catch (e) {}
+
+  // 3. Check local Web of Trust graph
+  try {
+    if (currentIdentity) {
+      const graph = loadTrustGraph(currentIdentity.username);
+      if (graph && graph.direct) {
+        for (const [pub, att] of Object.entries(graph.direct)) {
+          if (att && att.handle && att.handle.toLowerCase() === normalized) {
+            const data = { username: normalized, pubkey: pub, status: "active", version: 1 };
+            setCachedRecipientKey(normalized, data);
+            setCachedRecipientKey(token, data);
+            return data;
+          }
+        }
+      }
+    }
+  } catch (e) {}
+
+  // 4. Query relay via blinded token (with plaintext fallback)
   try {
     let res = await fetch(`/v1/resolve/${token}`);
     if (!res.ok && res.status === 404 && token !== normalized) {
@@ -1150,7 +1181,7 @@ async function resolveUser() {
   try {
     const data = await resolveRecipientBinding(username);
     if (!data) {
-      alert(`User @${username} not found on relay.\n\nNote: If @${username} is registered on another device, make sure that device has opened the app while online to auto-sync its identity.`);
+      showToast(`User @${username} not found on relay.`);
       return;
     }
 
@@ -1192,19 +1223,19 @@ async function resolveUser() {
       };
     }
   } catch (err) {
-    alert("Lookup error: " + err.message);
+    showToast("Lookup error: " + err.message);
   }
 }
 
 // Messaging / Chat
 async function sendChatMessage() {
   if (!currentIdentity || currentIdentity.status === "revoked") {
-    alert("You need an active identity to send messages.");
+    showToast("You need an active identity to send messages.");
     return;
   }
 
   if (!activeChatPeer) {
-    alert("Select or start a conversation first.");
+    showToast("Select or start a conversation first.");
     return;
   }
 
@@ -1221,12 +1252,12 @@ async function sendChatMessage() {
   let recipEdPubHex = "";
   const recipData = await resolveRecipientBinding(recipient);
   if (!recipData) {
-    alert(`Cannot send: Recipient @${recipient} not found on relay.\n\nMake sure @${recipient} has opened the app while online to register.`);
+    showToast(`Recipient @${recipient} not found. Look them up in Directory first.`);
     msgInput.value = text;
     return;
   }
   if (recipData.status === "revoked") {
-    alert(`Cannot send: Recipient @${recipient} is permanently revoked.`);
+    showToast(`Cannot send - @${recipient} account is revoked.`);
     msgInput.value = text;
     return;
   }
@@ -1344,12 +1375,12 @@ async function startRealtimeStream() {
   eventSource = new EventSource(url);
 
   eventSource.onopen = () => {
-    document.getElementById("relayDot").style.background = "#00e599";
+    document.getElementById("relayDot").style.background = "#ffffff";
     document.getElementById("relayStatusText").innerText = "Live Realtime Push (<2ms)";
   };
 
   eventSource.addEventListener("connected", (e) => {
-    document.getElementById("relayDot").style.background = "#00e599";
+    document.getElementById("relayDot").style.background = "#ffffff";
     document.getElementById("relayStatusText").innerText = "Live Realtime Push (<2ms)";
   });
 
@@ -1373,7 +1404,12 @@ async function startRealtimeStream() {
             bodyText = bytesToStr(opened);
             isE2EE = true;
           } else {
-            bodyText = "[⚠️ E2EE Decryption Failed]";
+            const failSender = (env.sender || m.sender || "").toLowerCase().trim();
+            if (failSender) {
+              localStorage.removeItem(`author_pk_cache_${failSender}`);
+              delete recipientKeyCache[failSender];
+            }
+            bodyText = "[Decryption failed - key mismatch]";
           }
           senderName = env.sender || m.sender;
         } else {
@@ -1389,7 +1425,7 @@ async function startRealtimeStream() {
       if (activeChatPeer && activeChatPeer === peer) {
         appendChatMessageDOM("incoming", bodyText, senderName, isE2EE);
       } else {
-        showToast(`💬 New message from @${senderName}`);
+        showToast(`New message from @${senderName}`);
       }
 
       // Acknowledge receipt so relay prunes it
@@ -1464,7 +1500,7 @@ function appendChatMessageDOM(type, text, sender, isE2EE = false) {
     badge.style.color = "#888888";
     badge.style.fontSize = "0.75rem";
     badge.style.marginLeft = "0.4rem";
-    badge.innerText = "🔒 Encrypted";
+    badge.innerText = "Encrypted";
     header.appendChild(badge);
   }
 
@@ -1645,7 +1681,7 @@ function initApp() {
 
   // Online / Offline State Handlers
   window.addEventListener("online", () => {
-    document.getElementById("relayDot").style.background = "#00e599";
+    document.getElementById("relayDot").style.background = "#ffffff";
     document.getElementById("relayStatusText").innerText = "Online (Reconnected)";
     startRealtimeStream();
     showToast("Internet connection restored");

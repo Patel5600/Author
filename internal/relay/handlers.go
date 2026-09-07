@@ -423,17 +423,17 @@ func (h *Handler) HandleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify recipient exists and is active
+	// Verify recipient exists and is active (if already registered)
 	recipientId, err := h.store.GetIdentity(req.Recipient)
 	if err != nil {
 		if errors.Is(err, ErrIdentityNotFound) {
-			h.respondError(w, http.StatusNotFound, "Recipient identity not found")
+			// Recipient is not yet registered on this relay instance (e.g. server restarted or recipient offline).
+			// Allow queuing the message so it is delivered as soon as they open the app.
+		} else {
+			h.respondError(w, http.StatusInternalServerError, "Database error retrieving recipient")
 			return
 		}
-		h.respondError(w, http.StatusInternalServerError, "Database error retrieving recipient")
-		return
-	}
-	if recipientId.Status != protocol.StatusActive {
+	} else if recipientId.Status != protocol.StatusActive {
 		h.respondError(w, http.StatusForbidden, "Recipient identity is revoked")
 		return
 	}
