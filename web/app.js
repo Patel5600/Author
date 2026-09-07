@@ -154,15 +154,29 @@ function loadChatHistory(username) {
   }
 }
 
-function saveChatHistoryMessage(username, type, text, sender, isE2EE = false, peer = "", msgId = "", status = "Sent") {
+function saveChatHistoryMessage(username, type, text, sender, isE2EE = false, peer = "", msgId = "", status = "Sent", expiresAt = 0, readSent = false) {
   if (!username) return "";
   const history = loadChatHistory(username);
   const resolvedPeer = (peer || (type === "incoming" ? sender : "")).toLowerCase().trim();
   const id = msgId || ("msg_" + getRandomNonce(8));
-  history.push({ id, type, text, sender, isE2EE, peer: resolvedPeer, time: Date.now(), status });
+  history.push({ id, type, text, sender, isE2EE, peer: resolvedPeer, time: Date.now(), status, expiresAt, readSent });
   if (history.length > 200) history.shift();
   localStorage.setItem(getChatHistoryKey(username), JSON.stringify(history));
   return id;
+}
+
+function purgeExpiredMessages(username) {
+  if (!username) return;
+  const history = loadChatHistory(username);
+  const now = Date.now();
+  const valid = history.filter(m => !m.expiresAt || m.expiresAt > now);
+  if (valid.length !== history.length) {
+    localStorage.setItem(getChatHistoryKey(username), JSON.stringify(valid));
+    if (activeChatPeer) {
+      renderChatHistory(username, activeChatPeer);
+    }
+    renderConversationsList(document.getElementById("inputFilterChats")?.value || "");
+  }
 }
 
 function updateMessageDeliveryStatus(username, msgId, newStatus) {
@@ -988,8 +1002,31 @@ function openConversationWith(username) {
   if (avatarEl) avatarEl.innerText = username[0].toUpperCase();
 
   if (currentIdentity) {
+    purgeExpiredMessages(currentIdentity.username);
     localStorage.setItem(`author_last_chat_recipient_${currentIdentity.username}`, username);
     renderChatHistory(currentIdentity.username, username);
+
+    // Sync disappearing message retention selector
+    const retentionSelect = document.getElementById("chatRetentionSelect");
+    if (retentionSelect) {
+      const savedTtl = localStorage.getItem(`author_ttl_${currentIdentity.username}_${username}`) || "0";
+      retentionSelect.value = savedTtl;
+    }
+
+    // Collect unread incoming messages and emit read receipt
+    const history = loadChatHistory(currentIdentity.username);
+    const unreadIds = [];
+    for (const m of history) {
+      const p = (m.peer || (m.type === "incoming" ? m.sender : "")).toLowerCase().trim();
+      if (p === username && m.type === "incoming" && !m.readSent && m.id) {
+        unreadIds.push(m.id);
+        m.readSent = true;
+      }
+    }
+    if (unreadIds.length > 0) {
+      localStorage.setItem(getChatHistoryKey(currentIdentity.username), JSON.stringify(history));
+      sendReadReceipt(username, unreadIds);
+    }
   }
 
   renderConversationsList(document.getElementById("inputFilterChats")?.value || "");
@@ -1293,9 +1330,14 @@ async function sendChatMessage() {
   }
   recipEdPubHex = recipData.pubkey;
 
-  // 2. Optimistic UI: Append immediately with unique message ID and Sending state
+  // 2. Disappearing messages retention check
+  const retentionSelect = document.getElementById("chatRetentionSelect");
+  const ttl = retentionSelect ? parseInt(retentionSelect.value || "0", 10) : 0;
+  const expiresAt = ttl > 0 ? (Date.now() + ttl * 1000) : 0;
+
+  // Optimistic UI: Append immediately with unique message ID, Sending state, and expiresAt
   const msgId = "msg_" + getRandomNonce(8);
-  saveChatHistoryMessage(currentIdentity.username, "outgoing", text, currentIdentity.username, true, recipient, msgId, "Sending");
+  saveChatHistoryMessage(currentIdentity.username, "outgoing", text, currentIdentity.username, true, recipient, msgId, "Sending", expiresAt);
   appendChatMessageDOM("outgoing", text, currentIdentity.username, true, Date.now(), "Sending", msgId);
   renderConversationsList(document.getElementById("inputFilterChats")?.value || "");
 
@@ -1310,7 +1352,8 @@ async function sendChatMessage() {
       type: "msg",
       msg_id: msgId,
       body: text,
-      sender: currentIdentity.username
+      sender: currentIdentity.username,
+      ttl: ttl
     });
     const ciphertextBytes = nacl.box(strToBytes(innerPayload), boxNonce, recipXPub, ephemKeyPair.secretKey);
 
@@ -1439,6 +1482,61 @@ async function sendDeliveryReceipt(recipient, targetMsgId) {
   }
 }
 
+// Silent End-to-End Read Receipt Emission
+async function sendReadReceipt(recipient, targetMsgIds) {
+  if (!currentIdentity || !recipient || !targetMsgIds || targetMsgIds.length === 0) return;
+  const recipData = await resolveRecipientBinding(recipient);
+  if (!recipData || !recipData.pubkey) return;
+
+  try {
+    const recipXPub = ed25519PubToCurve25519(fromHex(recipData.pubkey));
+    const ephemKeyPair = nacl.box.keyPair();
+    const boxNonce = nacl.randomBytes(24);
+
+    const receiptInner = JSON.stringify({
+      v: 1,
+      type: "read_receipt",
+      target_ids: targetMsgIds,
+      sender: currentIdentity.username
+    });
+    const ciphertextBytes = nacl.box(strToBytes(receiptInner), boxNonce, recipXPub, ephemKeyPair.secretKey);
+
+    const envelope = JSON.stringify({
+      v: 1,
+      alg: "x25519-xsalsa20-poly1305",
+      ephem_pub: toHex(ephemKeyPair.publicKey),
+      nonce: toHex(boxNonce),
+      ciphertext: toHex(ciphertextBytes),
+      sender: currentIdentity.username
+    });
+
+    const payloadHash = await sha256Hex(envelope);
+    const timestamp = Math.floor(Date.now() / 1000);
+    const nonce = getRandomNonce(16);
+
+    const recipientToken = await deriveHandleToken(recipient);
+    const senderToken = currentIdentity.handleToken || await deriveHandleToken(currentIdentity.username);
+
+    const msg = `${PROTOCOL_PREFIX}:SEND:${recipientToken}:${senderToken}:${payloadHash}:${timestamp}:${nonce}`;
+    const sigBytes = nacl.sign.detached(strToBytes(msg), fromHex(currentIdentity.privKey));
+
+    await fetch(getRelayBaseUrl() + "/v1/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        recipient: recipientToken,
+        sender: senderToken,
+        payload: envelope,
+        timestamp,
+        nonce,
+        sig: toHex(sigBytes)
+      })
+    });
+  } catch (err) {
+    console.error("Read receipt error:", err);
+  }
+}
+
 // Real-Time SSE Stream with Automatic Reconnect & Cursor Gap-Fill
 async function startRealtimeStream() {
   if (reconnectTimer) {
@@ -1505,13 +1603,24 @@ async function startRealtimeStream() {
           if (opened) {
             bodyText = bytesToStr(opened);
             isE2EE = true;
+            let incomingMsgId = "";
+            let incomingExpiresAt = 0;
             try {
               const inner = JSON.parse(bodyText);
               if (inner && inner.type === "receipt" && inner.target_id) {
                 isReceipt = true;
                 updateMessageDeliveryStatus(username, inner.target_id, "Delivered");
+              } else if (inner && inner.type === "read_receipt" && Array.isArray(inner.target_ids)) {
+                isReceipt = true;
+                for (const tid of inner.target_ids) {
+                  updateMessageDeliveryStatus(username, tid, "Read");
+                }
               } else if (inner && inner.type === "msg") {
                 bodyText = inner.body || inner.text || bodyText;
+                incomingMsgId = inner.msg_id || "";
+                if (inner.ttl && inner.ttl > 0) {
+                  incomingExpiresAt = Date.now() + (inner.ttl * 1000);
+                }
                 if (inner.msg_id && (env.sender || m.sender)) {
                   sendDeliveryReceipt(env.sender || m.sender, inner.msg_id);
                 }
@@ -1532,14 +1641,22 @@ async function startRealtimeStream() {
         }
       } catch {}
 
-      // If it was a delivery receipt, acknowledge and do not render as chat bubble
+      // If it was a delivery or read receipt, acknowledge and do not render as chat bubble
       if (isReceipt) {
         await acknowledgeMessages([m.id]);
         return;
       }
 
       const peer = (senderName || "").toLowerCase().trim();
-      saveChatHistoryMessage(username, "incoming", bodyText, senderName, isE2EE, peer);
+      let readSent = false;
+      if (activeChatPeer && activeChatPeer === peer) {
+        readSent = true;
+        if (incomingMsgId) {
+          sendReadReceipt(peer, [incomingMsgId]);
+        }
+      }
+
+      saveChatHistoryMessage(username, "incoming", bodyText, senderName, isE2EE, peer, incomingMsgId, "Delivered", incomingExpiresAt, readSent);
       renderConversationsList(document.getElementById("inputFilterChats")?.value || "");
 
       if (activeChatPeer && activeChatPeer === peer) {
@@ -1854,6 +1971,25 @@ function initApp() {
   document.getElementById("inputChatMessage").addEventListener("keydown", (e) => {
     if (e.key === "Enter") sendChatMessage();
   });
+
+  // Disappearing Messages Retention Setting
+  const retentionSelect = document.getElementById("chatRetentionSelect");
+  if (retentionSelect) {
+    retentionSelect.onchange = (e) => {
+      if (currentIdentity && activeChatPeer) {
+        localStorage.setItem(`author_ttl_${currentIdentity.username}_${activeChatPeer}`, e.target.value);
+        const labels = { "0": "Keep Forever", "3600": "1 Hour", "86400": "24 Hours", "604800": "7 Days" };
+        showToast("Disappearing timer set to: " + (labels[e.target.value] || "Custom"));
+      }
+    };
+  }
+
+  // Periodic Purge of Expired Disappearing Messages (every 15s)
+  setInterval(() => {
+    if (currentIdentity) {
+      purgeExpiredMessages(currentIdentity.username);
+    }
+  }, 15000);
 
   // Cross-tab synchronization
   window.addEventListener("storage", (e) => {

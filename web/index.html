@@ -232,9 +232,15 @@
                   <div style="font-size: 0.72rem; color: var(--text-muted);" id="activeContactSubtext">Direct Encrypted Session</div>
                 </div>
               </div>
-              <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <div style="display: flex; align-items: center; gap: 0.4rem;">
+                <select id="chatRetentionSelect" style="background: var(--bg); color: var(--text-muted); border: 1px solid var(--border); border-radius: 6px; padding: 0.25rem 0.4rem; font-size: 0.72rem; cursor: pointer;" title="Self-Destruct Timer">
+                  <option value="0">Keep Forever</option>
+                  <option value="3600">1 Hour</option>
+                  <option value="86400">24 Hours</option>
+                  <option value="604800">7 Days</option>
+                </select>
                 <button class="btn btn-secondary btn-sm" id="btnHeaderTrustVerify" title="Verify this contact">Verify</button>
-                <button class="btn btn-secondary btn-sm" id="btnRefreshInbox" title="Sync Inbox">↻ Sync</button>
+                <button class="btn btn-secondary btn-sm" id="btnRefreshInbox" title="Sync Inbox">Sync</button>
               </div>
             </div>
 
@@ -357,6 +363,6 @@
 
 <div id="toast" class="toast"></div>
 
-<script src="/app.js?v=15"></script>
+<script src="/app.js?v=16"></script>
 </body>
 </html>
